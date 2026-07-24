@@ -70,6 +70,20 @@ def process_one_video(parsed_json_path: Path, out_dir: Path, voice: str, brand_h
     seo_json = video_dir / f"{stem}_seo.json"
     run(["python3", str(PIPELINE_DIR / "select_seo.py"), str(parsed_json_path), str(seo_json)])
 
+    # Quality + copyright gate: this is the one automated check standing
+    # in for a human watching the video before it uploads. A failure here
+    # means "don't upload this," full stop — better to skip a day's video
+    # than publish something silently broken (dead audio, a frozen
+    # render) or something using an asset nobody signed off on.
+    qc_result = subprocess.run(
+        ["python3", str(PIPELINE_DIR / "quality_check.py"), str(video_dir), stem, voice],
+        capture_output=True, text=True,
+    )
+    print(qc_result.stdout)
+    if qc_result.returncode != 0:
+        print(qc_result.stderr, file=sys.stderr)
+        raise RuntimeError(f"Quality/copyright check failed for {stem} — upload skipped. See {stem}_quality_report.json for details.")
+
     video_id = None
     if not skip_upload:
         delay_hours = float(os.environ.get("PUBLISH_DELAY_HOURS", "6"))

@@ -1,0 +1,18 @@
+{
+  "_comment": "Every non-generated media asset the video pipeline is allowed to use, with its license. quality_check.py's copyright gate reads this file and fails the run if assemble_video.py (or any future stage) references something not listed here — so adding real B-roll or music later requires deliberately logging its license here first, rather than silently shipping unlicensed content.",
+  "approved_tts_voices": [
+    "en-US-GuyNeural",
+    "en-US-AriaNeural",
+    "en-US-ChristopherNeural",
+    "en-US-JennyNeural",
+    "en-US-EricNeural",
+    "en-US-MichelleNeural"
+  ],
+  "_tts_note": "Microsoft Edge neural voices (via the free edge-tts library) are usable for this kind of content; they are not a cloned or impersonated real person's voice.",
+  "approved_fonts": [
+    {"name": "Poppins", "license": "SIL Open Font License 1.1", "source": "Google Fonts"},
+    {"name": "DejaVu Sans", "license": "Bitstream Vera / public-domain-like license", "source": "system font, bundled with most Linux distros"}
+  ],
+  "broll_and_music_assets": [],
+  "_broll_and_music_note": "Empty by design — the current pipeline generates its background/visuals entirely from code (gradients, text, charts), so there is no external footage or music to license yet. If you add stock B-roll or music later (see production pipeline README's 'how to upgrade' section), add an entry here for every asset: {\"file\": \"...\", \"source\": \"Pexels/Pixabay/YouTube Audio Library/etc\", \"license\": \"...\", \"url\": \"...\"}. quality_check.py will fail closed if it finds referenced media that isn't logged here."
+}

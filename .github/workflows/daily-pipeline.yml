@@ -1,0 +1,73 @@
+name: Daily Finance Channel Pipeline
+
+on:
+  schedule:
+    # 00:30 UTC = 6:00 AM IST — matches the research/script schedule this
+    # replaces. Cron is UTC regardless of where you are; adjust if needed.
+    - cron: "30 0 * * *"
+  workflow_dispatch:
+    # Lets you trigger a run manually from the Actions tab — useful for
+    # testing without waiting for the schedule, or re-running a failed day.
+    inputs:
+      num_videos:
+        description: "Number of videos to produce"
+        default: "3"
+      topic_focus:
+        description: "Optional topic focus/steer (leave blank for none)"
+        default: ""
+      skip_upload:
+        description: "Render everything but skip the YouTube upload (dry run)"
+        type: boolean
+        default: false
+
+jobs:
+  daily-cycle:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180  # rendering 3 full videos with the retention-feature overlays is not fast — see production-pipeline README's performance note
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg imagemagick fonts-dejavu fonts-noto
+          # Poppins font (used for headlines/thumbnails) isn't in the default repos
+          mkdir -p ~/.fonts
+          curl -sL -o ~/.fonts/Poppins-Bold.ttf "https://github.com/google/fonts/raw/main/ofl/poppins/Poppins-Bold.ttf"
+          fc-cache -f
+
+      - name: Install Python dependencies
+        run: pip install -r requirements.txt
+
+      - name: Restore YouTube credentials
+        if: ${{ !inputs.skip_upload }}
+        run: |
+          echo "${{ secrets.YOUTUBE_CLIENT_SECRET_B64 }}" | base64 -d > pipeline/client_secret.json
+          echo "${{ secrets.YOUTUBE_TOKEN_B64 }}" | base64 -d > pipeline/youtube_token.json
+
+      - name: Run the daily cycle
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          PUBLISH_DELAY_HOURS: ${{ vars.PUBLISH_DELAY_HOURS || '6' }}
+          TTS_VOICE: ${{ vars.TTS_VOICE || 'en-US-GuyNeural' }}
+          BRAND_HEX: ${{ vars.BRAND_HEX || '1F6FEB' }}
+          SKIP_UPLOAD: ${{ inputs.skip_upload && '1' || '' }}
+        run: |
+          python3 pipeline/daily_cycle.py output "${{ inputs.num_videos || '3' }}" "${{ inputs.topic_focus || '' }}"
+
+      - name: Upload artifacts (always, even on partial failure)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: daily-output-${{ github.run_id }}
+          path: output/
+          retention-days: 30
+
+      # Poppins TTF's actual OFL path can shift; adjust the font-download
+      # step above if the release layout changes. If a run ever fails at
+      # that curl step, generate_thumbnail.py / assemble_video.py will
+      # error clearly on a missing font path — that's the signal to fix.

@@ -1,7 +1,6 @@
 output/
 pipeline/client_secret.json
 pipeline/youtube_token.json
-pipeline/scripts/__pycache__/
-__pycache__/
+**/__pycache__/
 *.pyc
 .DS_Store

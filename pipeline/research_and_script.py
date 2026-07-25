@@ -100,13 +100,14 @@ def run(num_videos: int, topic_focus: str):
         topic_focus=topic_focus or "no specific focus — pick the strongest topics across the full range of US finance news",
     )
 
-    response = client.messages.create(
+with client.messages.stream(
         model=MODEL,
         max_tokens=16000,
         system=system,
         tools=[{"type": "web_search_20250305", "name": "web_search", "max_uses": 20}],
         messages=[{"role": "user", "content": f"Research, select, fact-check, and write {num_videos} finance video scripts for today."}],
-    )
+    ) as stream:
+        response = stream.get_final_message()
 
     # The final text block carries the JSON; earlier blocks are the model's
     # search-tool-use turns, which we don't need here (they're visible in

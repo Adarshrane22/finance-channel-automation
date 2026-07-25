@@ -100,7 +100,12 @@ def run(num_videos: int, topic_focus: str):
         topic_focus=topic_focus or "no specific focus — pick the strongest topics across the full range of US finance news",
     )
 
-with client.messages.stream(
+    # Research + fact-check + scripting with web search can comfortably run
+    # past 10 minutes for num_videos > 1. The SDK requires streaming for
+    # any call that might take that long (non-streaming requests get killed
+    # by a client-side timeout ceiling) — .stream() handles that while still
+    # giving us one complete assembled response via get_final_message().
+    with client.messages.stream(
         model=MODEL,
         max_tokens=16000,
         system=system,

@@ -40,13 +40,16 @@ jobs:
           # (FONT_BOLD / FONT_BLACK), so the download destination must match it.
           sudo mkdir -p /usr/share/fonts/truetype/google-fonts
           sudo curl -fsSL -o /usr/share/fonts/truetype/google-fonts/Poppins-Bold.ttf "https://github.com/google/fonts/raw/main/ofl/poppins/Poppins-Bold.ttf"
-          # Fail loudly here instead of downstream with an opaque Pillow error
-          # if the download didn't actually produce a valid font file.
           fc-cache -f
-          python3 -c "from PIL import ImageFont; ImageFont.truetype('/usr/share/fonts/truetype/google-fonts/Poppins-Bold.ttf', 40)" || (echo "::error::Poppins-Bold.ttf failed to download or is invalid" && exit 1)
 
       - name: Install Python dependencies
         run: pip install -r requirements.txt
+
+      - name: Verify font is valid
+        # Fail loudly here instead of downstream with an opaque Pillow error
+        # if the download didn't actually produce a valid font file. Runs
+        # after Python deps so Pillow is actually importable at this point.
+        run: python3 -c "from PIL import ImageFont; ImageFont.truetype('/usr/share/fonts/truetype/google-fonts/Poppins-Bold.ttf', 40)" || (echo "::error::Poppins-Bold.ttf failed to download or is invalid" && exit 1)
 
       - name: Restore YouTube credentials
         if: ${{ !inputs.skip_upload }}

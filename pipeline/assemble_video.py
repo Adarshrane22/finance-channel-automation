@@ -230,52 +230,71 @@ def build_broll_layer(section_times, broll_dir: Path, credits: list, video_durat
     dimmed with a translucent black overlay so white captions stay
     readable over busy footage, and looped or trimmed to exactly fill
     that section's time range."""
-    if not broll_dir or not broll_dir.exists() or not credits:
+    if not broll_dir or not broll_dir.exists():
+        print("  B-roll: no --broll-dir given or it doesn't exist — gradient background only.")
+        return []
+    if not credits:
+        print(f"  B-roll: {broll_dir} exists but broll_credits.json is empty/missing — gradient background only.")
         return []
 
+    print(f"  B-roll: {len(credits)} credited clip(s) available, {len(section_times)} section(s) to match against.")
     credit_by_section = {c["section_index"]: c for c in credits}
     clips = []
     for idx, s in enumerate(section_times):
         credit = credit_by_section.get(idx)
         if not credit:
+            print(f"  B-roll: section {idx} ({s.get('name')}) — no credited clip for this index, keeping gradient.")
             continue
         clip_path = broll_dir.parent / credit["file"]
         if not clip_path.exists():
+            print(f"  B-roll: section {idx} ({s.get('name')}) — credited file {clip_path} not found on disk, keeping gradient.")
             continue
 
         start, end = s["start_s"], min(s["end_s"], video_duration)
         seg_duration = end - start
         if seg_duration <= 0:
+            print(f"  B-roll: section {idx} ({s.get('name')}) — zero/negative duration ({start:.2f}-{end:.2f}s), skipping.")
             continue
 
         try:
             raw = VideoFileClip(str(clip_path)).without_audio()
+
+            # Loop short clips, trim long ones, so the segment exactly fills
+            # this section's slot in the timeline.
+            if raw.duration < seg_duration:
+                raw = raw.with_effects([vfx.Loop(duration=seg_duration)])
+            else:
+                raw = raw.subclipped(0, seg_duration)
+
+            # Fill-crop to the full 1920x1080 canvas regardless of the
+            # source clip's native aspect ratio (Pexels footage varies).
+            raw = raw.with_effects([vfx.Resize(height=HEIGHT)])
+            if raw.w < WIDTH:
+                raw = raw.with_effects([vfx.Resize(width=WIDTH)])
+            raw = raw.with_effects([vfx.Crop(x_center=raw.w / 2, y_center=raw.h / 2, width=WIDTH, height=HEIGHT)])
+
+            dim = ImageClip(np.zeros((HEIGHT, WIDTH, 3), dtype=np.uint8)).with_duration(seg_duration).with_opacity(0.35)
+            segment = (
+                CompositeVideoClip([raw, dim], size=(WIDTH, HEIGHT))
+                .with_start(start)
+                .with_duration(seg_duration)
+                .with_effects([vfx.CrossFadeIn(0.3)])
+            )
         except Exception as e:
-            print(f"  WARNING: could not load broll clip {clip_path}: {e}")
+            # Catches failures anywhere in loading OR the resize/crop/loop/
+            # composite chain (not just the initial open) — a codec issue
+            # or an unexpected moviepy effects-API change further down
+            # would previously have either crashed the whole render or
+            # (worse) silently produced no clip with zero visibility into
+            # why, instead of being caught here as a clean, logged,
+            # per-section skip.
+            print(f"  B-roll: section {idx} ({s.get('name')}) — WARNING: failed to prepare clip {clip_path}: {e}")
             continue
 
-        # Loop short clips, trim long ones, so the segment exactly fills
-        # this section's slot in the timeline.
-        if raw.duration < seg_duration:
-            raw = raw.with_effects([vfx.Loop(duration=seg_duration)])
-        else:
-            raw = raw.subclipped(0, seg_duration)
-
-        # Fill-crop to the full 1920x1080 canvas regardless of the source
-        # clip's native aspect ratio (Pexels footage varies).
-        raw = raw.with_effects([vfx.Resize(height=HEIGHT)])
-        if raw.w < WIDTH:
-            raw = raw.with_effects([vfx.Resize(width=WIDTH)])
-        raw = raw.with_effects([vfx.Crop(x_center=raw.w / 2, y_center=raw.h / 2, width=WIDTH, height=HEIGHT)])
-
-        dim = ImageClip(np.zeros((HEIGHT, WIDTH, 3), dtype=np.uint8)).with_duration(seg_duration).with_opacity(0.35)
-        segment = (
-            CompositeVideoClip([raw, dim], size=(WIDTH, HEIGHT))
-            .with_start(start)
-            .with_duration(seg_duration)
-            .with_effects([vfx.CrossFadeIn(0.3)])
-        )
+        print(f"  B-roll: section {idx} ({s.get('name')}) — applying {clip_path.name} from {start:.2f}s to {end:.2f}s.")
         clips.append(segment)
+
+    print(f"  B-roll: {len(clips)}/{len(section_times)} section(s) got real footage; the rest kept the gradient background.")
     return clips
 
 

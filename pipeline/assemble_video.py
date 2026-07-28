@@ -161,9 +161,25 @@ def build_karaoke_captions(word_events, video_duration: float, section_boundarie
         if line_end <= line_start:
             continue
 
+        # IMPORTANT: `cache` must be captured as a default argument (like
+        # _line_words/_line_start below), not referenced as a free
+        # variable. A `for` loop in Python does not create a new scope per
+        # iteration — `cache = {}` here just reassigns the same variable
+        # slot every time, so any closure that reads `cache` as a free
+        # variable (instead of a default arg, which is bound once at
+        # function-definition time) ends up sharing ONE dict across every
+        # line's clip once the loop finishes. Because the cache keys are
+        # small integers (0, 1, 2, ...) that repeat across different
+        # lines, later clips would silently find an already-cached entry
+        # left behind by an earlier line and return ITS stale rendered
+        # image instead of rendering their own words — which is exactly
+        # what caused the video to visually "freeze" on the first caption
+        # line for most of its length. Binding `_cache=cache` as a default
+        # argument fixes it the same way `_line_words=line_words` already
+        # avoids the identical late-binding trap for the word list.
         cache = {}
 
-        def make_frame(t, _line_words=line_words, _line_start=line_start):
+        def make_frame(t, _line_words=line_words, _line_start=line_start, _cache=cache):
             local_t = t + _line_start
             active_idx = 0
             for i, w in enumerate(_line_words):
@@ -172,11 +188,11 @@ def build_karaoke_captions(word_events, video_duration: float, section_boundarie
                     break
                 if local_t >= w["start_s"]:
                     active_idx = i
-            if active_idx not in cache:
-                cache[active_idx] = render_caption_line(_line_words, active_idx, font)[:, :, :3]
-            return cache[active_idx]
+            if active_idx not in _cache:
+                _cache[active_idx] = render_caption_line(_line_words, active_idx, font)[:, :, :3]
+            return _cache[active_idx]
 
-        def make_mask(t, _line_words=line_words, _line_start=line_start):
+        def make_mask(t, _line_words=line_words, _line_start=line_start, _cache=cache):
             local_t = t + _line_start
             active_idx = 0
             for i, w in enumerate(_line_words):
@@ -186,9 +202,9 @@ def build_karaoke_captions(word_events, video_duration: float, section_boundarie
                 if local_t >= w["start_s"]:
                     active_idx = i
             key = f"mask_{active_idx}"
-            if key not in cache:
-                cache[key] = render_caption_line(_line_words, active_idx, font)[:, :, 3] / 255.0
-            return cache[key]
+            if key not in _cache:
+                _cache[key] = render_caption_line(_line_words, active_idx, font)[:, :, 3] / 255.0
+            return _cache[key]
 
         clip = (
             VideoClip(make_frame, duration=line_end - line_start)

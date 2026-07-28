@@ -61,8 +61,14 @@ def process_one_video(parsed_json_path: Path, out_dir: Path, voice: str, brand_h
     srt_path = video_dir / f"{stem}.srt"
     run(["python3", str(PIPELINE_DIR / "build_captions.py"), str(generated_captions), str(srt_path)])
 
+    # Free stock B-roll (Pexels) — optional visual enhancement. If
+    # PEXELS_API_KEY isn't set, or Pexels has nothing usable for a given
+    # section, that section just keeps assemble_video.py's gradient
+    # background, so this never blocks the run.
+    run(["python3", str(PIPELINE_DIR / "fetch_broll.py"), str(parsed_json_path), str(video_dir)])
+
     final_mp4 = video_dir / f"{stem}.mp4"
-    run(["python3", str(PIPELINE_DIR / "assemble_video.py"), str(generated_mp3), str(generated_captions), str(parsed_json_path), str(final_mp4), brand_hex])
+    run(["python3", str(PIPELINE_DIR / "assemble_video.py"), str(generated_mp3), str(generated_captions), str(parsed_json_path), str(final_mp4), brand_hex, "--broll-dir", str(video_dir / "broll")])
 
     run(["python3", str(PIPELINE_DIR / "generate_thumbnail.py"), str(parsed_json_path), str(video_dir), brand_hex])
     thumbnail_path = video_dir / f"{stem}_thumb_headline.jpg"

@@ -187,25 +187,44 @@ def check_copyright_and_licensing(video_dir: Path, stem: str, voice_used: str, m
     report.add("tts_voice_approved", voice_used in approved_voices, f"'{voice_used}' {'in' if voice_used in approved_voices else 'NOT in'} approved voice list")
 
     known = known_filenames(stem)
-    known.update({"manifest.json", "cycle_summary.json"})
+    known.update({"manifest.json", "cycle_summary.json", "broll_credits.json"})
     licensed_asset_files = {a.get("file") for a in manifest.get("broll_and_music_assets", [])}
 
+    # Per-video B-roll (fetched dynamically by fetch_broll.py from Pexels)
+    # can't be pre-listed in the static global asset_manifest.json the way
+    # a hand-picked music track would be — instead it's licensed via
+    # broll_credits.json sitting next to it. Every file actually found in
+    # broll/ must have a matching credited entry with a license, or the
+    # copyright gate fails closed exactly like it would for any other
+    # unaccounted-for media.
+    broll_credits_path = video_dir / "broll_credits.json"
+    broll_licensed_files = set()
+    if broll_credits_path.exists():
+        try:
+            broll_credits = json.loads(broll_credits_path.read_text())
+            broll_licensed_files = {c["file"] for c in broll_credits if c.get("file") and c.get("license")}
+        except Exception as e:
+            report.add("broll_credits_readable", False, f"broll_credits.json exists but couldn't be parsed: {e}")
+
     unaccounted = []
-    for path in video_dir.iterdir():
+    for path in video_dir.rglob("*"):
         if path.is_dir():
             continue
-        if path.name in known or path.name.startswith("qc_frame") or path.name.startswith(stem):
-            # anything prefixed with the video's own stem is pipeline-generated for this video
-            if path.name in known or path.name.startswith(f"{stem}_thumb_") or path.name.startswith("qc_frame"):
-                continue
-        if path.name in licensed_asset_files:
+        if path.name.startswith("qc_frame") or "_qc_tmp" in path.parts:
             continue
-        unaccounted.append(path.name)
+        rel = path.relative_to(video_dir).as_posix()
+        if path.name in known or path.name.startswith(f"{stem}_thumb_"):
+            continue
+        if rel in licensed_asset_files or path.name in licensed_asset_files:
+            continue
+        if rel in broll_licensed_files:
+            continue
+        unaccounted.append(rel)
 
     report.add(
         "no_unlicensed_assets",
         len(unaccounted) == 0,
-        "no unaccounted media files found" if not unaccounted else f"found files not in the pipeline's known outputs or asset_manifest.json: {unaccounted}",
+        "no unaccounted media files found" if not unaccounted else f"found files not in the pipeline's known outputs, asset_manifest.json, or broll_credits.json: {unaccounted}",
     )
 
 

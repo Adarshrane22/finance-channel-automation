@@ -14,5 +14,5 @@
     {"name": "DejaVu Sans", "license": "Bitstream Vera / public-domain-like license", "source": "system font, bundled with most Linux distros"}
   ],
   "broll_and_music_assets": [],
-  "_broll_and_music_note": "Empty by design — the current pipeline generates its background/visuals entirely from code (gradients, text, charts), so there is no external footage or music to license yet. If you add stock B-roll or music later (see production pipeline README's 'how to upgrade' section), add an entry here for every asset: {\"file\": \"...\", \"source\": \"Pexels/Pixabay/YouTube Audio Library/etc\", \"license\": \"...\", \"url\": \"...\"}. quality_check.py will fail closed if it finds referenced media that isn't logged here."
+  "_broll_and_music_note": "Empty by design, and stays empty for the Pexels B-roll fetch_broll.py adds — that footage is fetched dynamically per video, not a fixed local asset, so it's licensed per-video via a broll_credits.json file quality_check.py reads instead of a static entry here. This list is for any FIXED asset you add by hand later (e.g. a licensed music track reused across every video) — add an entry for each: {\"file\": \"...\", \"source\": \"...\", \"license\": \"...\", \"url\": \"...\"}. quality_check.py fails closed if it finds referenced media that isn't logged either here or in a video's own broll_credits.json."
 }

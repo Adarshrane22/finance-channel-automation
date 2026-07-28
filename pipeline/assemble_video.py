@@ -47,7 +47,7 @@ from pathlib import Path
 import json
 
 from moviepy import (
-    AudioFileClip, CompositeVideoClip, ImageClip, VideoClip, vfx,
+    AudioFileClip, CompositeVideoClip, ImageClip, VideoClip, VideoFileClip, vfx,
 )
 from PIL import Image, ImageDraw, ImageFont
 import numpy as np
@@ -221,6 +221,64 @@ def compute_section_times(sections, word_events):
     return times
 
 
+def build_broll_layer(section_times, broll_dir: Path, credits: list, video_duration: float):
+    """Real stock footage (fetched by fetch_broll.py) behind the captions/
+    callouts, for whichever sections it found a match for — sections
+    without one just keep the gradient background showing through
+    underneath, since this list is laid on top of `background`, not
+    instead of it. Each clip is muted (the voiceover is the only audio),
+    dimmed with a translucent black overlay so white captions stay
+    readable over busy footage, and looped or trimmed to exactly fill
+    that section's time range."""
+    if not broll_dir or not broll_dir.exists() or not credits:
+        return []
+
+    credit_by_section = {c["section_index"]: c for c in credits}
+    clips = []
+    for idx, s in enumerate(section_times):
+        credit = credit_by_section.get(idx)
+        if not credit:
+            continue
+        clip_path = broll_dir.parent / credit["file"]
+        if not clip_path.exists():
+            continue
+
+        start, end = s["start_s"], min(s["end_s"], video_duration)
+        seg_duration = end - start
+        if seg_duration <= 0:
+            continue
+
+        try:
+            raw = VideoFileClip(str(clip_path)).without_audio()
+        except Exception as e:
+            print(f"  WARNING: could not load broll clip {clip_path}: {e}")
+            continue
+
+        # Loop short clips, trim long ones, so the segment exactly fills
+        # this section's slot in the timeline.
+        if raw.duration < seg_duration:
+            raw = raw.with_effects([vfx.Loop(duration=seg_duration)])
+        else:
+            raw = raw.subclipped(0, seg_duration)
+
+        # Fill-crop to the full 1920x1080 canvas regardless of the source
+        # clip's native aspect ratio (Pexels footage varies).
+        raw = raw.with_effects([vfx.Resize(height=HEIGHT)])
+        if raw.w < WIDTH:
+            raw = raw.with_effects([vfx.Resize(width=WIDTH)])
+        raw = raw.with_effects([vfx.Crop(x_center=raw.w / 2, y_center=raw.h / 2, width=WIDTH, height=HEIGHT)])
+
+        dim = ImageClip(np.zeros((HEIGHT, WIDTH, 3), dtype=np.uint8)).with_duration(seg_duration).with_opacity(0.35)
+        segment = (
+            CompositeVideoClip([raw, dim], size=(WIDTH, HEIGHT))
+            .with_start(start)
+            .with_duration(seg_duration)
+            .with_effects([vfx.CrossFadeIn(0.3)])
+        )
+        clips.append(segment)
+    return clips
+
+
 def render_stat_callout(stat: str) -> np.ndarray:
     """Just the number, deliberately — no label text. Earlier versions
     also printed a text summary of the section under the number, but that
@@ -328,6 +386,13 @@ def main():
     rest = sys.argv[5:]
     draft = "--draft" in rest
     rest = [a for a in rest if a != "--draft"]
+
+    broll_dir = None
+    if "--broll-dir" in rest:
+        i = rest.index("--broll-dir")
+        broll_dir = Path(rest[i + 1])
+        rest = rest[:i] + rest[i + 2:]
+
     brand_hex = rest[0] if rest else "1F6FEB"
     brand_rgb = hex_to_rgb(brand_hex)
 
@@ -346,13 +411,20 @@ def main():
         idx += max(1, len(s["text"].split()))
 
     background = build_background(duration, brand_rgb)
+
+    broll_clips = []
+    if broll_dir:
+        credits_path = broll_dir.parent / "broll_credits.json"
+        broll_credits = json.loads(credits_path.read_text()) if credits_path.exists() else []
+        broll_clips = build_broll_layer(section_times, broll_dir, broll_credits, duration)
+
     title_card = build_title_card(parsed["title"])
     caption_clips = build_karaoke_captions(word_events, duration, section_boundaries=section_boundaries)
     stat_clips = build_stat_callouts(section_times, duration, skip_before_s=TITLE_CARD_DURATION - 0.5)
     tag_clips = build_section_tags(section_times, duration)
     progress_bar = build_progress_bar(duration)
 
-    layers = [background, title_card, *caption_clips, *stat_clips, *tag_clips, progress_bar]
+    layers = [background, *broll_clips, title_card, *caption_clips, *stat_clips, *tag_clips, progress_bar]
     final = CompositeVideoClip(layers, size=(WIDTH, HEIGHT))
     final = final.with_audio(audio).with_duration(duration)
 

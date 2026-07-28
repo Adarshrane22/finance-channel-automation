@@ -81,8 +81,18 @@ def upload(video_path, thumbnail_path, seo_json_path, publish_at, privacy="priva
     print(f"Uploaded. Video ID: {video_id}  URL: https://youtu.be/{video_id}")
 
     if thumbnail_path and Path(thumbnail_path).exists():
-        youtube.thumbnails().set(videoId=video_id, media_body=MediaFileUpload(thumbnail_path)).execute()
-        print("Thumbnail set.")
+        # The video upload is the part that matters; a thumbnail failure
+        # (most commonly: the channel hasn't completed YouTube's phone
+        # verification, which gates the custom-thumbnail API) shouldn't
+        # throw away an otherwise-successful upload. Log it clearly and
+        # keep going — YouTube will use an auto-generated thumbnail until
+        # this is set by hand or the channel gets verified.
+        try:
+            youtube.thumbnails().set(videoId=video_id, media_body=MediaFileUpload(thumbnail_path)).execute()
+            print("Thumbnail set.")
+        except Exception as e:
+            print(f"WARNING: video uploaded successfully, but setting the custom thumbnail failed: {e}")
+            print("This usually means the channel needs phone verification (YouTube Studio > Settings > Channel > Feature eligibility > Custom thumbnails). The video is live/scheduled with YouTube's auto-generated thumbnail for now.")
 
     return video_id
 

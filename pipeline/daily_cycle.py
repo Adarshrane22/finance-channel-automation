@@ -153,6 +153,21 @@ def main():
     for f in failures:
         print(f"  FAIL {f['file']}: {f['error']}")
 
+    # Refresh the live dashboard's data file with real YouTube Analytics
+    # numbers. Deliberately non-fatal: a stale dashboard is far better than
+    # letting an optional reporting step fail an otherwise-successful
+    # video run. Skipped entirely on a skip_upload dry run (no token
+    # restored in that mode — see the workflow's "Restore YouTube
+    # credentials" step condition).
+    if not skip_upload:
+        dash_result = subprocess.run(
+            ["python3", str(PIPELINE_DIR / "export_dashboard_data.py")],
+            capture_output=True, text=True,
+        )
+        print(dash_result.stdout)
+        if dash_result.returncode != 0:
+            print(f"WARNING: dashboard data export failed (non-fatal): {dash_result.stderr[-500:]}", file=sys.stderr)
+
     # Surface a readable summary in the GitHub Actions job UI, not just logs
     step_summary = os.environ.get("GITHUB_STEP_SUMMARY")
     if step_summary:

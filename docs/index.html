@@ -1,0 +1,342 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>The Rate Report — Live Dashboard</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.4/chart.umd.min.js"></script>
+<style>
+  :root {
+    color-scheme: light;
+    --page:            #f9f9f7;
+    --surface-1:       #fcfcfb;
+    --text-primary:    #0b0b0b;
+    --text-secondary:  #52514e;
+    --text-muted:      #898781;
+    --gridline:        #e1e0d9;
+    --border:          rgba(11,11,11,0.10);
+    --series-1:        #2a78d6;
+    --series-2:        #eb6834;
+    --series-3:        #1baf7a;
+    --status-good:      #0ca30c;
+    --status-warning:   #fab219;
+    --status-critical:  #d03b3b;
+  }
+  [data-theme="dark"] {
+    color-scheme: dark;
+    --page:            #0d0d0d;
+    --surface-1:       #1a1a19;
+    --text-primary:    #ffffff;
+    --text-secondary:  #c3c2b7;
+    --text-muted:      #898781;
+    --gridline:        #2c2c2a;
+    --border:          rgba(255,255,255,0.10);
+    --series-1:        #3987e5;
+    --series-2:        #d95926;
+    --series-3:        #199e70;
+    --status-good:      #0ca30c;
+    --status-warning:   #fab219;
+    --status-critical:  #d03b3b;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+    background: var(--page);
+    color: var(--text-primary);
+    padding: 32px 20px 80px;
+  }
+  .wrap { max-width: 1180px; margin: 0 auto; }
+
+  header {
+    display: flex; justify-content: space-between; align-items: flex-start;
+    flex-wrap: wrap; gap: 16px; margin-bottom: 8px;
+  }
+  header h1 { font-size: 26px; margin: 0 0 4px; }
+  header p.sub { margin: 0; color: var(--text-secondary); font-size: 13px; }
+  .theme-toggle {
+    border: 1px solid var(--border); background: var(--surface-1); color: var(--text-secondary);
+    border-radius: 8px; padding: 8px 14px; font-size: 13px; cursor: pointer;
+  }
+  .updated-badge {
+    display: inline-flex; align-items: center; gap: 6px; font-size: 12px;
+    color: var(--text-muted); margin-bottom: 24px;
+  }
+  .updated-badge .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--status-good); }
+
+  .links { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 28px; }
+  .links a {
+    display: inline-flex; align-items: center; gap: 6px; padding: 8px 14px; border-radius: 8px;
+    background: var(--surface-1); border: 1px solid var(--border); color: var(--text-primary);
+    text-decoration: none; font-size: 13px; font-weight: 600;
+  }
+  .links a:hover { border-color: var(--series-1); }
+
+  .empty-state {
+    background: var(--surface-1); border: 1px dashed var(--border); border-radius: 12px;
+    padding: 40px 24px; text-align: center; color: var(--text-secondary); font-size: 14px;
+    margin-bottom: 28px;
+  }
+
+  .stat-row {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+    gap: 12px; margin-bottom: 32px;
+  }
+  .stat-tile {
+    background: var(--surface-1); border: 1px solid var(--border); border-radius: 10px; padding: 16px;
+  }
+  .stat-tile .label { font-size: 12px; color: var(--text-muted); margin-bottom: 6px; }
+  .stat-tile .value { font-size: 26px; font-weight: 700; }
+
+  section { margin-bottom: 36px; }
+  section > h2 {
+    font-size: 15px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-muted);
+    margin: 0 0 14px; border-bottom: 1px solid var(--gridline); padding-bottom: 8px;
+  }
+
+  .chart-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 16px; }
+  .chart-card {
+    background: var(--surface-1); border: 1px solid var(--border); border-radius: 10px; padding: 16px;
+  }
+  .chart-card h3 { font-size: 13px; margin: 0 0 12px; color: var(--text-secondary); font-weight: 600; }
+  .chart-card canvas { max-height: 220px; }
+
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  thead th {
+    text-align: left; font-size: 11px; text-transform: uppercase; letter-spacing: .03em;
+    color: var(--text-muted); padding: 8px 10px; border-bottom: 1px solid var(--gridline);
+  }
+  tbody td { padding: 10px; border-bottom: 1px solid var(--gridline); vertical-align: middle; }
+  tbody tr:hover { background: rgba(42,120,214,0.06); }
+  td.num { font-variant-numeric: tabular-nums; text-align: right; }
+  .vid-thumb { width: 64px; height: 36px; object-fit: cover; border-radius: 4px; background: var(--gridline); }
+  .vid-title { display: flex; align-items: center; gap: 10px; max-width: 320px; }
+  .vid-title a { color: var(--text-primary); text-decoration: none; font-weight: 600; font-size: 13px; line-height: 1.3; }
+  .vid-title a:hover { color: var(--series-1); }
+  .status-badge {
+    font-size: 10px; text-transform: uppercase; padding: 2px 6px; border-radius: 4px;
+    background: var(--gridline); color: var(--text-secondary);
+  }
+
+  /* pipeline + checklist (reused) */
+  .flow { display: flex; flex-wrap: wrap; gap: 8px; }
+  .flow-step {
+    background: var(--surface-1); border: 1px solid var(--border); border-radius: 10px;
+    padding: 14px 16px; flex: 1 1 120px; min-width: 120px;
+  }
+  .flow-step .name { font-size: 13px; font-weight: 700; margin-bottom: 4px; }
+  .flow-step .desc { font-size: 11px; color: var(--text-secondary); line-height: 1.4; }
+  .status-dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; margin-right: 5px; }
+  .status-dot.good { background: var(--status-good); }
+  .status-dot.warning { background: var(--status-warning); }
+  .flow-arrow { display: flex; align-items: center; justify-content: center; color: var(--text-muted); font-size: 14px; flex: 0 0 14px; }
+
+  .checklist { display: flex; flex-direction: column; gap: 8px; }
+  .check-item {
+    display: flex; align-items: center; gap: 10px; background: var(--surface-1); border: 1px solid var(--border);
+    border-radius: 8px; padding: 12px 14px; font-size: 14px;
+  }
+  .check-item .icon { font-size: 15px; width: 20px; text-align: center; flex-shrink: 0; }
+  .check-item .icon.good { color: var(--status-good); }
+  .check-item .icon.warning { color: var(--status-warning); }
+  .check-item .txt { flex: 1; }
+  .check-item .txt .action { color: var(--text-secondary); font-size: 12px; display: block; margin-top: 2px; }
+
+  footer { margin-top: 40px; padding-top: 16px; border-top: 1px solid var(--gridline); font-size: 12px; color: var(--text-muted); }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header>
+    <div>
+      <h1>The Rate Report — Live Dashboard</h1>
+      <p class="sub">Real YouTube Analytics data, refreshed automatically by the daily pipeline.</p>
+    </div>
+    <button class="theme-toggle" onclick="toggleTheme()">Toggle dark mode</button>
+  </header>
+  <div class="updated-badge"><span class="dot" id="updated-dot"></span><span id="updated-text">Loading…</span></div>
+
+  <div class="links">
+    <a href="https://github.com/Adarshrane22/finance-channel-automation" target="_blank">📦 GitHub Repo</a>
+    <a href="https://github.com/Adarshrane22/finance-channel-automation/actions" target="_blank">⚙️ Actions Runs</a>
+    <a href="https://studio.youtube.com" target="_blank">📺 YouTube Studio</a>
+    <a href="https://www.youtube.com/@TheRateReport-q6w" target="_blank">▶️ Channel</a>
+  </div>
+
+  <div id="empty-state" class="empty-state" style="display:none;">
+    No analytics data yet — this fills in automatically after the pipeline's first real (non-dry-run) upload and the
+    <code>export_dashboard_data.py</code> step runs. Check back after tomorrow's scheduled run, or trigger one manually
+    from the Actions tab.
+  </div>
+
+  <div id="data-sections" style="display:none;">
+    <div class="stat-row" id="stat-tiles"></div>
+
+    <section>
+      <h2>Trends (last 90 days)</h2>
+      <div class="chart-grid">
+        <div class="chart-card"><h3>Total views (recent-window snapshot per day)</h3><canvas id="chart-views"></canvas></div>
+        <div class="chart-card"><h3>Average click-through rate (%)</h3><canvas id="chart-ctr"></canvas></div>
+        <div class="chart-card"><h3>Average watch time (seconds)</h3><canvas id="chart-watch"></canvas></div>
+      </div>
+    </section>
+
+    <section>
+      <h2>Recent videos</h2>
+      <div class="chart-card" style="overflow-x:auto;">
+        <table>
+          <thead><tr>
+            <th>Video</th><th>Status</th><th class="num">Views</th><th class="num">Likes</th>
+            <th class="num">CTR</th><th class="num">Avg watch</th><th class="num">% viewed</th>
+          </tr></thead>
+          <tbody id="video-rows"></tbody>
+        </table>
+      </div>
+    </section>
+  </div>
+
+  <section>
+    <h2>Pipeline — 9 stages, one GitHub Actions run</h2>
+    <div class="flow">
+      <div class="flow-step"><div class="name"><span class="status-dot good"></span>1. Research + Script</div><div class="desc">Claude API + web search</div></div>
+      <div class="flow-arrow">→</div>
+      <div class="flow-step"><div class="name"><span class="status-dot good"></span>2. Voiceover</div><div class="desc">Edge-TTS + word timing</div></div>
+      <div class="flow-arrow">→</div>
+      <div class="flow-step"><div class="name"><span class="status-dot good"></span>3. Captions</div><div class="desc">Karaoke line data</div></div>
+      <div class="flow-arrow">→</div>
+      <div class="flow-step"><div class="name"><span class="status-dot good"></span>4. B-roll Fetch</div><div class="desc">Pexels footage</div></div>
+      <div class="flow-arrow">→</div>
+      <div class="flow-step"><div class="name"><span class="status-dot good"></span>5. Video Assembly</div><div class="desc">Full composite render</div></div>
+      <div class="flow-arrow">→</div>
+      <div class="flow-step"><div class="name"><span class="status-dot good"></span>6. Thumbnails</div><div class="desc">3 variants</div></div>
+      <div class="flow-arrow">→</div>
+      <div class="flow-step"><div class="name"><span class="status-dot good"></span>7. SEO</div><div class="desc">Title/desc/tags</div></div>
+      <div class="flow-arrow">→</div>
+      <div class="flow-step"><div class="name"><span class="status-dot good"></span>8. Quality Gate</div><div class="desc">Fails closed</div></div>
+      <div class="flow-arrow">→</div>
+      <div class="flow-step"><div class="name"><span class="status-dot good"></span>9. Upload</div><div class="desc">Private → auto-public</div></div>
+      <div class="flow-arrow">→</div>
+      <div class="flow-step"><div class="name"><span class="status-dot good"></span>10. Dashboard Export</div><div class="desc">Writes this page's data</div></div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Setup checklist</h2>
+    <div class="checklist">
+      <div class="check-item"><span class="icon good">✔</span><div class="txt">Repo, secrets, channel, daily schedule all live</div></div>
+      <div class="check-item"><span class="icon warning">!</span><div class="txt">Custom thumbnails<span class="action">Needs channel phone verification (Studio → Settings → Channel → Feature eligibility)</span></div></div>
+      <div class="check-item"><span class="icon warning">!</span><div class="txt">YouTube OAuth token<span class="action">Refresh weekly while app is in "Testing" mode</span></div></div>
+      <div class="check-item"><span class="icon good">✔</span><div class="txt">This dashboard<span class="action">Hosted via GitHub Pages, refreshed automatically after each pipeline run</span></div></div>
+    </div>
+  </section>
+
+  <footer>
+    Data source: YouTube Data API + Analytics API, exported by <code>pipeline/export_dashboard_data.py</code> and committed to
+    <code>docs/dashboard_data.json</code> by the daily GitHub Actions run. This page reads that file directly — no server, no backend.
+  </footer>
+</div>
+
+<script>
+  function toggleTheme() {
+    const root = document.documentElement;
+    root.setAttribute('data-theme', root.getAttribute('data-theme') === 'dark' ? 'light' : 'dark');
+  }
+
+  function fmtNum(n) {
+    if (n === null || n === undefined) return '—';
+    return n.toLocaleString();
+  }
+  function fmtSecs(n) {
+    if (n === null || n === undefined) return '—';
+    const m = Math.floor(n / 60), s = Math.round(n % 60);
+    return m > 0 ? `${m}m ${s}s` : `${s}s`;
+  }
+  function timeAgo(iso) {
+    const diffMs = Date.now() - new Date(iso).getTime();
+    const mins = Math.floor(diffMs / 60000);
+    if (mins < 60) return `${mins}m ago`;
+    const hrs = Math.floor(mins / 60);
+    if (hrs < 24) return `${hrs}h ago`;
+    return `${Math.floor(hrs / 24)}d ago`;
+  }
+
+  function cssVar(name) {
+    return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+  }
+
+  function lineChart(canvasId, labels, values, color, label) {
+    const ctx = document.getElementById(canvasId);
+    if (!ctx) return;
+    new Chart(ctx, {
+      type: 'line',
+      data: {
+        labels,
+        datasets: [{
+          label, data: values, borderColor: color, backgroundColor: color + '22',
+          borderWidth: 2, pointRadius: 3, pointHoverRadius: 5, tension: 0.25, fill: true,
+        }],
+      },
+      options: {
+        responsive: true,
+        plugins: { legend: { display: false }, tooltip: { mode: 'index', intersect: false } },
+        scales: {
+          x: { grid: { display: false }, ticks: { color: cssVar('--text-muted'), maxTicksLimit: 6 } },
+          y: { grid: { color: cssVar('--gridline') }, ticks: { color: cssVar('--text-muted') }, beginAtZero: true },
+        },
+      },
+    });
+  }
+
+  fetch('dashboard_data.json?t=' + Date.now())
+    .then(r => { if (!r.ok) throw new Error('no data file'); return r.json(); })
+    .then(data => {
+      if (!data.videos || data.videos.length === 0) {
+        document.getElementById('empty-state').style.display = 'block';
+        document.getElementById('updated-text').textContent = 'No data yet';
+        return;
+      }
+      document.getElementById('data-sections').style.display = 'block';
+      document.getElementById('updated-text').textContent = `Data as of ${new Date(data.last_updated).toLocaleString()} (${timeAgo(data.last_updated)})`;
+
+      const t = data.recent_totals || {};
+      const c = data.channel_totals || {};
+      document.getElementById('stat-tiles').innerHTML = `
+        <div class="stat-tile"><div class="label">Channel subscribers</div><div class="value">${fmtNum(c.subscriber_count)}</div></div>
+        <div class="stat-tile"><div class="label">Channel total views</div><div class="value">${fmtNum(c.view_count)}</div></div>
+        <div class="stat-tile"><div class="label">Channel total videos</div><div class="value">${fmtNum(c.video_count)}</div></div>
+        <div class="stat-tile"><div class="label">Recent-window views</div><div class="value">${fmtNum(t.views)}</div></div>
+        <div class="stat-tile"><div class="label">Avg CTR</div><div class="value">${t.avg_ctr_pct !== null && t.avg_ctr_pct !== undefined ? t.avg_ctr_pct + '%' : '—'}</div></div>
+        <div class="stat-tile"><div class="label">Avg watch time</div><div class="value">${fmtSecs(t.avg_watch_time_s)}</div></div>
+      `;
+
+      const hist = data.history || [];
+      const labels = hist.map(h => h.date);
+      lineChart('chart-views', labels, hist.map(h => h.total_views), cssVar('--series-1'), 'Views');
+      lineChart('chart-ctr', labels, hist.map(h => h.avg_ctr_pct), cssVar('--series-2'), 'CTR %');
+      lineChart('chart-watch', labels, hist.map(h => h.avg_watch_time_s), cssVar('--series-3'), 'Watch time (s)');
+
+      const rows = data.videos.map(v => `
+        <tr>
+          <td><div class="vid-title">
+            <img class="vid-thumb" src="${v.thumbnail_url || ''}" alt="">
+            <a href="${v.url}" target="_blank">${v.title}</a>
+          </div></td>
+          <td><span class="status-badge">${v.privacy_status || '—'}</span></td>
+          <td class="num">${fmtNum(v.views)}</td>
+          <td class="num">${fmtNum(v.likes)}</td>
+          <td class="num">${v.ctr_pct !== null && v.ctr_pct !== undefined ? v.ctr_pct + '%' : '—'}</td>
+          <td class="num">${fmtSecs(v.avg_view_duration_s)}</td>
+          <td class="num">${v.avg_pct_viewed !== null && v.avg_pct_viewed !== undefined ? v.avg_pct_viewed + '%' : '—'}</td>
+        </tr>
+      `).join('');
+      document.getElementById('video-rows').innerHTML = rows;
+    })
+    .catch(err => {
+      document.getElementById('empty-state').style.display = 'block';
+      document.getElementById('empty-state').innerText = 'Could not load dashboard_data.json yet — ' + err.message;
+      document.getElementById('updated-text').textContent = 'No data yet';
+    });
+</script>
+</body>
+</html>

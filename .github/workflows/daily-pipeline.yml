@@ -20,6 +20,9 @@ on:
         type: boolean
         default: false
 
+permissions:
+  contents: write  # needed for the "Publish dashboard data" step to commit docs/dashboard_data.json back to the repo
+
 jobs:
   daily-cycle:
     runs-on: ubuntu-latest
@@ -75,6 +78,25 @@ jobs:
           name: daily-output-${{ github.run_id }}
           path: output/
           retention-days: 30
+
+      - name: Publish dashboard data
+        # Commits the refreshed docs/dashboard_data.json (written by
+        # export_dashboard_data.py inside daily_cycle.py) back to the repo,
+        # so the GitHub Pages dashboard always reflects the latest run
+        # without any manual step. Runs even on partial failure — a
+        # partially-successful run still has real data worth publishing.
+        # Silently no-ops if nothing changed (e.g. a skip_upload dry run).
+        if: always()
+        run: |
+          if [ -n "$(git status --porcelain docs/dashboard_data.json)" ]; then
+            git config user.name "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            git add docs/dashboard_data.json
+            git commit -m "Update dashboard data [skip ci] ($(date -u +%Y-%m-%d))"
+            git push
+          else
+            echo "No dashboard data changes to publish."
+          fi
 
       # Poppins TTF's actual OFL path can shift; adjust the font-download
       # step above if the release layout changes. If a run ever fails at

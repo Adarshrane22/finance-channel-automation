@@ -35,7 +35,12 @@ DEFAULT_VOICE = "en-US-GuyNeural"
 
 
 async def synthesize(text: str, voice: str, out_mp3: str, out_captions: str):
-    communicate = edge_tts.Communicate(text, voice, rate="+0%")
+    # boundary="WordBoundary" is required as of edge-tts 7.x — the library's
+    # Communicate class now defaults to boundary="SentenceBoundary", which
+    # silently produces zero WordBoundary events (audio still generates
+    # fine, so this fails quietly rather than with an obvious error) unless
+    # word-level timing is explicitly requested here.
+    communicate = edge_tts.Communicate(text, voice, rate="+0%", boundary="WordBoundary")
     word_events = []
     with open(out_mp3, "wb") as audio_file:
         async for chunk in communicate.stream():

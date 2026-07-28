@@ -35,10 +35,15 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y ffmpeg imagemagick fonts-dejavu fonts-noto
-          # Poppins font (used for headlines/thumbnails) isn't in the default repos
-          mkdir -p ~/.fonts
-          curl -sL -o ~/.fonts/Poppins-Bold.ttf "https://github.com/google/fonts/raw/main/ofl/poppins/Poppins-Bold.ttf"
+          # Poppins font (used for headlines/thumbnails) isn't in the default repos.
+          # assemble_video.py / generate_thumbnail.py hardcode this exact path
+          # (FONT_BOLD / FONT_BLACK), so the download destination must match it.
+          sudo mkdir -p /usr/share/fonts/truetype/google-fonts
+          sudo curl -fsSL -o /usr/share/fonts/truetype/google-fonts/Poppins-Bold.ttf "https://github.com/google/fonts/raw/main/ofl/poppins/Poppins-Bold.ttf"
+          # Fail loudly here instead of downstream with an opaque Pillow error
+          # if the download didn't actually produce a valid font file.
           fc-cache -f
+          python3 -c "from PIL import ImageFont; ImageFont.truetype('/usr/share/fonts/truetype/google-fonts/Poppins-Bold.ttf', 40)" || (echo "::error::Poppins-Bold.ttf failed to download or is invalid" && exit 1)
 
       - name: Install Python dependencies
         run: pip install -r requirements.txt

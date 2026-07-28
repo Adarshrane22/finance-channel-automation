@@ -66,6 +66,22 @@ def main():
     out_captions = out_dir / f"{stem}_captions.json"
 
     words = asyncio.run(synthesize(data["narration"], voice, str(out_mp3), str(out_captions)))
+    if not words:
+        # Edge-TTS occasionally drops WordBoundary events on a given call
+        # (transient service issue) even though it produces valid audio.
+        # A silent empty-captions file would only surface much later as a
+        # confusing MoviePy error, so retry once immediately, then fail
+        # loudly here if it happens twice in a row.
+        print("WARNING: 0 word-boundary events on first attempt — retrying once before failing.")
+        words = asyncio.run(synthesize(data["narration"], voice, str(out_mp3), str(out_captions)))
+        if not words:
+            raise RuntimeError(
+                f"Edge-TTS returned audio but zero WordBoundary (caption) events, twice in a row, "
+                f"for voice '{voice}'. This breaks karaoke captions downstream. Not a code bug in "
+                f"this script — likely a transient Edge-TTS/Microsoft speech service issue. Re-run "
+                f"the pipeline, or try a different --voice if it persists."
+            )
+
     print(f"Voiceover: {out_mp3}")
     print(f"Word-level captions: {out_captions} ({len(words)} words)")
 

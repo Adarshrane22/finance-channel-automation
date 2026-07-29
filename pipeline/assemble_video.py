@@ -47,7 +47,7 @@ from pathlib import Path
 import json
 
 from moviepy import (
-    AudioFileClip, CompositeVideoClip, ImageClip, VideoClip, VideoFileClip, vfx,
+    AudioFileClip, CompositeVideoClip, ImageClip, VideoClip, VideoFileClip, concatenate_videoclips, vfx,
 )
 from PIL import Image, ImageDraw, ImageFont
 import numpy as np
@@ -414,13 +414,19 @@ def build_title_card(title: str, duration: float = TITLE_CARD_DURATION):
 
 def main():
     if len(sys.argv) < 5:
-        print("Usage: python assemble_video.py <audio.mp3> <word_events.json> <parsed_script.json> <output.mp4> [brand_hex]")
+        print("Usage: python assemble_video.py <audio.mp3> <word_events.json> <parsed_script.json> <output.mp4> [brand_hex] [--no-intro-outro]")
         sys.exit(1)
 
     audio_path, word_events_path, parsed_json_path, out_path = sys.argv[1:5]
     rest = sys.argv[5:]
     draft = "--draft" in rest
     rest = [a for a in rest if a != "--draft"]
+
+    # On by default — every video gets the branded open/close automatically.
+    # This flag exists for quick layout/timing checks where you don't want
+    # to wait through rendering the intro/outro on every draft iteration.
+    no_intro_outro = "--no-intro-outro" in rest
+    rest = [a for a in rest if a != "--no-intro-outro"]
 
     broll_dir = None
     if "--broll-dir" in rest:
@@ -462,6 +468,19 @@ def main():
     layers = [background, *broll_clips, title_card, *caption_clips, *stat_clips, *tag_clips, progress_bar]
     final = CompositeVideoClip(layers, size=(WIDTH, HEIGHT))
     final = final.with_audio(audio).with_duration(duration)
+
+    if not no_intro_outro:
+        # Imported here rather than at module level: generate_intro_outro.py
+        # itself imports from this module (build_background, hex_to_rgb,
+        # etc.), so a top-level import would be circular. concatenate_videoclips
+        # automatically offsets every clip after the first by the running
+        # total duration, so nothing in the caption/B-roll/stat-callout
+        # timing above (all computed relative to the narration's own t=0)
+        # needs to change — it just gets shifted as one unit.
+        from generate_intro_outro import build_intro_clip, build_outro_clip
+        intro = build_intro_clip(brand_hex=brand_hex)
+        outro = build_outro_clip(brand_hex=brand_hex)
+        final = concatenate_videoclips([intro, final, outro], method="compose")
 
     final.write_videofile(
         out_path, fps=15 if draft else 30, codec="libx264", audio_codec="aac",

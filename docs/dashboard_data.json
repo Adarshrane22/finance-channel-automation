@@ -1,11 +1,25 @@
 {
-  "last_updated": "2026-07-29T08:55:21.660631+00:00",
+  "last_updated": "2026-07-29T12:43:56.808278+00:00",
   "videos": [
+    {
+      "video_id": "pqF53y-xgrI",
+      "title": "Fed Rate Decision & $1.53T Margin Debt: Tech Stock Sell-off Ahead?",
+      "published_at": "2026-07-29T09:20:38Z",
+      "thumbnail_url": "https://i.ytimg.com/vi/pqF53y-xgrI/mqdefault.jpg",
+      "views": 2,
+      "likes": 0,
+      "comments": 0,
+      "privacy_status": "public",
+      "ctr_pct": null,
+      "avg_view_duration_s": null,
+      "avg_pct_viewed": null,
+      "url": "https://youtu.be/pqF53y-xgrI"
+    },
     {
       "video_id": "9vML-YFOf6E",
       "title": "US Housing Market & Fed Rate Decision July 2026: Critical Updates",
       "published_at": "2026-07-29T06:47:16Z",
-      "thumbnail_url": "https://i9.ytimg.com/vi/9vML-YFOf6E/mqdefault.jpg?sqp=COT_ptMG&rs=AOn4CLAnRLFPBFcMX92a_aoCuMwqwVRj0Q",
+      "thumbnail_url": "https://i9.ytimg.com/vi/9vML-YFOf6E/mqdefault.jpg?sqp=CKDpp9MG&rs=AOn4CLCV6fFjyt6iGkRDGjNn2znKb95gHQ",
       "views": 1,
       "likes": 0,
       "comments": 0,
@@ -59,26 +73,26 @@
     }
   ],
   "recent_totals": {
-    "views": 7,
+    "views": 9,
     "likes": 0,
     "comments": 0,
-    "video_count": 4,
+    "video_count": 5,
     "avg_ctr_pct": null,
     "avg_watch_time_s": null
   },
   "channel_totals": {
     "subscriber_count": 0,
     "view_count": 0,
-    "video_count": 3
+    "video_count": 4
   },
   "history": [
     {
       "date": "2026-07-29",
-      "total_views": 7,
+      "total_views": 9,
       "avg_ctr_pct": null,
       "avg_watch_time_s": null,
       "channel_view_count": 0,
-      "channel_video_count": 3
+      "channel_video_count": 4
     }
   ]
 }

@@ -26,7 +26,7 @@ Design choices worth knowing about:
 Usage:
   python daily_cycle.py [output_dir] [num_videos] [topic_focus]
 
-Env vars used: ANTHROPIC_API_KEY (research_and_script.py),
+Env vars used: GEMINI_API_KEY (research_and_script.py),
 PUBLISH_DELAY_HOURS (default 6), TTS_VOICE (default en-US-GuyNeural),
 BRAND_HEX (default 1F6FEB), SKIP_UPLOAD (set to "1" to render everything
 but skip the actual YouTube upload — useful for a dry run).

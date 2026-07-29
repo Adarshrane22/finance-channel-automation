@@ -62,7 +62,14 @@ jobs:
 
       - name: Run the daily cycle
         env:
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          # Free Gemini API key (aistudio.google.com/apikey, no card needed)
+          # — gemini-2.5-flash's Google Search grounding is free up to 500
+          # requests/day, which is enormous headroom for one run/day.
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          # Optional repo variable (Settings > Secrets and variables > Actions
+          # > Variables) to point research_and_script.py at a different
+          # Gemini model. Leave unset to use the gemini-2.5-flash default.
+          GEMINI_MODEL: ${{ vars.GEMINI_MODEL || '' }}
           PEXELS_API_KEY: ${{ secrets.PEXELS_API_KEY }}
           PUBLISH_DELAY_HOURS: ${{ vars.PUBLISH_DELAY_HOURS || '6' }}
           TTS_VOICE: ${{ vars.TTS_VOICE || 'en-US-GuyNeural' }}

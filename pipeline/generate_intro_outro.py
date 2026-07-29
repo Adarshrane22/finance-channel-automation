@@ -23,7 +23,7 @@ import sys
 from pathlib import Path
 
 import numpy as np
-from moviepy import AudioClip, AudioFileClip, CompositeAudioClip, TextClip, VideoClip, vfx
+from moviepy import AudioClip, AudioFileClip, CompositeAudioClip, ImageClip, TextClip, VideoClip, vfx
 from PIL import Image, ImageDraw
 
 from moviepy import CompositeVideoClip
@@ -92,6 +92,25 @@ def synth_intro_chime(duration=INTRO_DURATION):
 def synth_outro_chime(duration=OUTRO_DURATION):
     """Two-note descending resolving chime — a clean 'that's a wrap' cue."""
     return _chime(duration, notes=(659.25, 523.25), note_len=0.45, gap=0.22)
+
+
+def synth_impact_thud(duration, fps=AUDIO_FPS):
+    """A short low-frequency 'impact' whump (fast pitch/amplitude decay
+    sine) plus a quick high shimmer — the same kind of cheap, fully
+    synthesized percussive hit real editors reach for on a hard cut/flash
+    transition. Zero licensing risk since it's generated math, not a
+    sample."""
+    def frame_function(t):
+        t_arr = np.atleast_1d(np.asarray(t, dtype=np.float64))
+        decay = np.exp(-t_arr * 14.0)
+        thud = 0.55 * np.sin(2 * np.pi * 90 * t_arr) * decay
+        shimmer_env = np.exp(-t_arr * 30.0)
+        shimmer = 0.15 * np.sin(2 * np.pi * 1800 * t_arr) * shimmer_env
+        wave = np.clip(thud + shimmer, -1.0, 1.0)
+        stereo = np.stack([wave, wave], axis=-1)
+        return stereo if np.asarray(t).ndim > 0 else stereo[0]
+
+    return AudioClip(frame_function, duration=duration, fps=fps)
 
 
 # ----------------------------------------------------------------------------
@@ -232,6 +251,53 @@ def build_outro_clip(brand_hex="1F6FEB", channel_name=CHANNEL_NAME, duration=OUT
     final = CompositeVideoClip(layers, size=(WIDTH, HEIGHT)).with_duration(duration)
     if with_audio:
         final = final.with_audio(synth_outro_chime(duration))
+    return final
+
+
+# ----------------------------------------------------------------------------
+# Thumbnail flash — puts the actual designed thumbnail graphic INTO the
+# video, not just as YouTube's separately-uploaded thumbnail image
+# ----------------------------------------------------------------------------
+
+THUMBNAIL_FLASH_DURATION = 1.4
+
+
+def build_thumbnail_flash_clip(thumbnail_path, duration=THUMBNAIL_FLASH_DURATION, with_audio=True):
+    """A brief 'cold open' flash of the exact thumbnail graphic, placed
+    right after the intro and before the hook. This is a standard
+    high-retention YouTube technique: showing viewers the same striking
+    image that got them to click reassures them they're in the right
+    video and reinforces the promise the thumbnail made, instead of the
+    thumbnail being a disconnected image nobody sees again after the
+    click.
+
+    generate_thumbnail.py's thumbnails are already 1280x720 — the same
+    16:9 aspect ratio as the 1920x1080 video canvas — so this is a
+    straight upscale with no cropping needed, kept sharp via a fast
+    Ken-Burns-style punch-in (1.06x -> 1.0x) rather than a static hold,
+    so it doesn't read as a flat inserted slide. A quick white flash-in
+    and a synthesized impact thud sell the 'snap to attention' cut.
+    """
+    img_clip = (
+        ImageClip(str(thumbnail_path))
+        .with_duration(duration)
+        .with_effects([vfx.Resize(new_size=(WIDTH, HEIGHT))])
+        .with_effects([vfx.Resize(lambda t: 1.06 - 0.06 * min(t / duration, 1.0))])
+        .with_position("center")
+    )
+
+    # White flash: a solid white frame that fades out almost immediately,
+    # so the cut in from the intro reads as a camera-flash snap rather
+    # than an abrupt hard cut.
+    flash = (
+        ImageClip(np.full((HEIGHT, WIDTH, 3), 255, dtype=np.uint8))
+        .with_duration(min(0.35, duration))
+        .with_effects([vfx.CrossFadeOut(min(0.3, duration * 0.5))])
+    )
+
+    final = CompositeVideoClip([img_clip, flash], size=(WIDTH, HEIGHT)).with_duration(duration)
+    if with_audio:
+        final = final.with_audio(synth_impact_thud(duration))
     return final
 
 

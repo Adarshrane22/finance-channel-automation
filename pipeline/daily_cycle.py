@@ -40,11 +40,37 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 PIPELINE_DIR = Path(__file__).parent
+DOCS_DIR = PIPELINE_DIR.parent / "docs"
 
 
 def run(cmd, **kwargs):
     print(f"$ {' '.join(str(c) for c in cmd)}")
     subprocess.run(cmd, check=True, **kwargs)
+
+
+def append_thumbnail_style_log(entry: dict):
+    """Records which thumbnail style actually got uploaded for a video,
+    keyed by video_id, so analyze_performance.py can later join it
+    against real YouTube Analytics CTR and feed a learned preference back
+    into generate_thumbnail.py's select_primary_variant. Lives in docs/
+    so the same GitHub Actions step that already commits
+    docs/dashboard_data.json back to the repo picks this up too — see
+    daily-pipeline.yml's "Publish dashboard + thumbnail performance data"
+    step. Best-effort: a logging failure here should never fail an
+    otherwise-successful upload."""
+    try:
+        DOCS_DIR.mkdir(parents=True, exist_ok=True)
+        log_path = DOCS_DIR / "thumbnail_style_log.json"
+        log = []
+        if log_path.exists():
+            try:
+                log = json.loads(log_path.read_text())
+            except Exception:
+                log = []
+        log.append(entry)
+        log_path.write_text(json.dumps(log, indent=2))
+    except Exception as e:
+        print(f"WARNING: could not append to thumbnail style log: {e}")
 
 
 def process_one_video(parsed_json_path: Path, out_dir: Path, voice: str, brand_hex: str, skip_upload: bool):
@@ -67,11 +93,37 @@ def process_one_video(parsed_json_path: Path, out_dir: Path, voice: str, brand_h
     # background, so this never blocks the run.
     run(["python3", str(PIPELINE_DIR / "fetch_broll.py"), str(parsed_json_path), str(video_dir)])
 
-    final_mp4 = video_dir / f"{stem}.mp4"
-    run(["python3", str(PIPELINE_DIR / "assemble_video.py"), str(generated_mp3), str(generated_captions), str(parsed_json_path), str(final_mp4), brand_hex, "--broll-dir", str(video_dir / "broll")])
-
+    # Thumbnails are generated BEFORE the video is assembled (reordered
+    # from the original research->voice->captions->broll->video->thumbnail
+    # sequence) specifically so assemble_video.py can flash the finished
+    # thumbnail graphic into the video's opening seconds — see
+    # generate_intro_outro.build_thumbnail_flash_clip for why that helps
+    # retention (viewers see the same image that got them to click).
     run(["python3", str(PIPELINE_DIR / "generate_thumbnail.py"), str(parsed_json_path), str(video_dir), brand_hex])
-    thumbnail_path = video_dir / f"{stem}_thumb_headline.jpg"
+
+    # generate_thumbnail.py now picks the single best-scoring variant
+    # itself (heuristics + learned per-style CTR weight, see its
+    # select_primary_variant) rather than this script always hardcoding
+    # "_thumb_headline.jpg". Fall back to the headline variant only if
+    # the chosen-variant sidecar is somehow missing (e.g. an older
+    # generate_thumbnail.py), so this never hard-fails a video.
+    chosen_path = video_dir / f"{stem}_thumb_chosen.json"
+    thumbnail_style = "headline_forward"
+    if chosen_path.exists():
+        try:
+            chosen = json.loads(chosen_path.read_text())
+            thumbnail_path = Path(chosen["path"])
+            thumbnail_style = chosen["style"]
+            print(f"Selected thumbnail style for {stem}: {thumbnail_style} ({chosen.get('reason')})")
+        except Exception as e:
+            print(f"WARNING: couldn't read {chosen_path} ({e}) — falling back to the headline variant.")
+            thumbnail_path = video_dir / f"{stem}_thumb_headline.jpg"
+    else:
+        thumbnail_path = video_dir / f"{stem}_thumb_headline.jpg"
+
+    final_mp4 = video_dir / f"{stem}.mp4"
+    run(["python3", str(PIPELINE_DIR / "assemble_video.py"), str(generated_mp3), str(generated_captions), str(parsed_json_path), str(final_mp4), brand_hex,
+         "--broll-dir", str(video_dir / "broll"), "--thumbnail", str(thumbnail_path)])
 
     seo_json = video_dir / f"{stem}_seo.json"
     run(["python3", str(PIPELINE_DIR / "select_seo.py"), str(parsed_json_path), str(seo_json)])
@@ -106,7 +158,21 @@ def process_one_video(parsed_json_path: Path, out_dir: Path, voice: str, brand_h
             if "Video ID:" in line:
                 video_id = line.split("Video ID:")[1].split()[0]
 
-    return {"stem": stem, "video": str(final_mp4), "thumbnail": str(thumbnail_path), "video_id": video_id}
+        if video_id:
+            title = stem
+            try:
+                title = json.loads(seo_json.read_text()).get("chosen_title", stem)
+            except Exception:
+                pass
+            append_thumbnail_style_log({
+                "stem": stem,
+                "video_id": video_id,
+                "style": thumbnail_style,
+                "title": title,
+                "uploaded_at": datetime.now(timezone.utc).isoformat(),
+            })
+
+    return {"stem": stem, "video": str(final_mp4), "thumbnail": str(thumbnail_path), "thumbnail_style": thumbnail_style, "video_id": video_id}
 
 
 def main():

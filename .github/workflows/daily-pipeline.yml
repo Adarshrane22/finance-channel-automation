@@ -60,6 +60,19 @@ jobs:
           echo "${{ secrets.YOUTUBE_CLIENT_SECRET_B64 }}" | base64 -d > pipeline/client_secret.json
           echo "${{ secrets.YOUTUBE_TOKEN_B64 }}" | base64 -d > pipeline/youtube_token.json
 
+      - name: Update thumbnail style weights from past performance
+        # Closes the thumbnail feedback loop: joins docs/thumbnail_style_log.json
+        # (which style each past video used) against real CTR from the
+        # Analytics API and writes docs/thumbnail_style_weights.json, which
+        # generate_thumbnail.py reads below to favor whichever style is
+        # actually earning more clicks. continue-on-error because this is
+        # a best-effort learning step (e.g. it no-ops gracefully with no
+        # performance history yet, or if the analytics scope isn't granted
+        # yet) — it must never block today's videos from being produced.
+        if: ${{ !inputs.skip_upload }}
+        continue-on-error: true
+        run: python3 pipeline/analyze_performance.py 90
+
       - name: Run the daily cycle
         env:
           # Free Gemini API key (aistudio.google.com/apikey, no card needed)
@@ -86,23 +99,31 @@ jobs:
           path: output/
           retention-days: 30
 
-      - name: Publish dashboard data
+      - name: Publish dashboard + thumbnail performance data
         # Commits the refreshed docs/dashboard_data.json (written by
-        # export_dashboard_data.py inside daily_cycle.py) back to the repo,
-        # so the GitHub Pages dashboard always reflects the latest run
-        # without any manual step. Runs even on partial failure — a
-        # partially-successful run still has real data worth publishing.
-        # Silently no-ops if nothing changed (e.g. a skip_upload dry run).
+        # export_dashboard_data.py inside daily_cycle.py), plus the two
+        # new thumbnail-learning files (docs/thumbnail_style_log.json,
+        # appended to by daily_cycle.py after each successful upload, and
+        # docs/thumbnail_style_weights.json, written by the
+        # analyze_performance.py step above) back to the repo, so both the
+        # GitHub Pages dashboard and next run's thumbnail selection always
+        # reflect the latest data without any manual step. Runs even on
+        # partial failure — a partially-successful run still has real data
+        # worth publishing. Silently no-ops if nothing changed (e.g. a
+        # skip_upload dry run, or the very first runs before either
+        # thumbnail-learning file exists yet).
         if: always()
         run: |
-          if [ -n "$(git status --porcelain docs/dashboard_data.json)" ]; then
-            git config user.name "github-actions[bot]"
-            git config user.email "github-actions[bot]@users.noreply.github.com"
-            git add docs/dashboard_data.json
-            git commit -m "Update dashboard data [skip ci] ($(date -u +%Y-%m-%d))"
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          for f in docs/dashboard_data.json docs/thumbnail_style_log.json docs/thumbnail_style_weights.json; do
+            [ -f "$f" ] && git add "$f"
+          done
+          if ! git diff --cached --quiet; then
+            git commit -m "Update dashboard + thumbnail performance data [skip ci] ($(date -u +%Y-%m-%d))"
             git push
           else
-            echo "No dashboard data changes to publish."
+            echo "No dashboard/thumbnail data changes to publish."
           fi
 
       # Poppins TTF's actual OFL path can shift; adjust the font-download

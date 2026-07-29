@@ -414,7 +414,7 @@ def build_title_card(title: str, duration: float = TITLE_CARD_DURATION):
 
 def main():
     if len(sys.argv) < 5:
-        print("Usage: python assemble_video.py <audio.mp3> <word_events.json> <parsed_script.json> <output.mp4> [brand_hex] [--no-intro-outro]")
+        print("Usage: python assemble_video.py <audio.mp3> <word_events.json> <parsed_script.json> <output.mp4> [brand_hex] [--no-intro-outro] [--thumbnail <path>]")
         sys.exit(1)
 
     audio_path, word_events_path, parsed_json_path, out_path = sys.argv[1:5]
@@ -427,6 +427,16 @@ def main():
     # to wait through rendering the intro/outro on every draft iteration.
     no_intro_outro = "--no-intro-outro" in rest
     rest = [a for a in rest if a != "--no-intro-outro"]
+
+    # If generate_thumbnail.py has already produced the video's thumbnail
+    # image (daily_cycle.py now runs it before this script specifically so
+    # this path exists), flash that exact graphic into the video itself
+    # right after the intro — see generate_intro_outro.build_thumbnail_flash_clip.
+    thumbnail_path = None
+    if "--thumbnail" in rest:
+        i = rest.index("--thumbnail")
+        thumbnail_path = Path(rest[i + 1])
+        rest = rest[:i] + rest[i + 2:]
 
     broll_dir = None
     if "--broll-dir" in rest:
@@ -477,10 +487,18 @@ def main():
         # total duration, so nothing in the caption/B-roll/stat-callout
         # timing above (all computed relative to the narration's own t=0)
         # needs to change — it just gets shifted as one unit.
-        from generate_intro_outro import build_intro_clip, build_outro_clip
+        from generate_intro_outro import build_intro_clip, build_outro_clip, build_thumbnail_flash_clip
         intro = build_intro_clip(brand_hex=brand_hex)
         outro = build_outro_clip(brand_hex=brand_hex)
-        final = concatenate_videoclips([intro, final, outro], method="compose")
+        sequence = [intro]
+        if thumbnail_path and thumbnail_path.exists():
+            # Right after the intro, before the hook — see
+            # build_thumbnail_flash_clip's docstring for why this position.
+            sequence.append(build_thumbnail_flash_clip(thumbnail_path))
+        elif thumbnail_path:
+            print(f"WARNING: --thumbnail {thumbnail_path} was passed but the file doesn't exist — skipping the in-video thumbnail flash.")
+        sequence += [final, outro]
+        final = concatenate_videoclips(sequence, method="compose")
 
     final.write_videofile(
         out_path, fps=15 if draft else 30, codec="libx264", audio_codec="aac",

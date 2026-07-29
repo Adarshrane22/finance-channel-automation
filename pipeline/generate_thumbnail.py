@@ -186,12 +186,40 @@ def variant_directional(data, brand_rgb, out_path):
     img.save(out_path, quality=93)
 
 
+def load_thumbnail_headline(parsed_json_path: Path):
+    """If research_and_script.py's Stage B marketing sidecar exists and
+    includes a dedicated thumbnail concept, its headline (written
+    specifically to be short and punchy for a 1280x720 image, distinct
+    from the video's actual title) is used for the on-image text instead
+    of a shortened video title. Returns None — and callers fall back to
+    the original behavior — if there's no sidecar or no thumbnail concept
+    in it."""
+    sidecar_path = parsed_json_path.with_name(parsed_json_path.stem + "_marketing.json")
+    if not sidecar_path.exists():
+        return None
+    try:
+        marketing = json.loads(sidecar_path.read_text())
+    except Exception as e:
+        print(f"WARNING: found {sidecar_path} but couldn't parse it ({e}) — using the video title for thumbnail text instead.")
+        return None
+    return (marketing.get("thumbnail") or {}).get("headline") or None
+
+
 def generate_all(parsed_json_path: str, out_dir: str, brand_hex="1F6FEB"):
-    data = json.loads(Path(parsed_json_path).read_text())
+    parsed_json_path = Path(parsed_json_path)
+    data = json.loads(parsed_json_path.read_text())
     brand_rgb = hex_to_rgb(brand_hex)
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
-    stem = Path(parsed_json_path).stem
+    stem = parsed_json_path.stem
+
+    # Only the on-image text uses the marketing headline (if any) — data
+    # itself (headline_stat, etc.) is left untouched so nothing else in
+    # this file needs to change.
+    thumb_headline = load_thumbnail_headline(parsed_json_path)
+    if thumb_headline:
+        print(f"Using marketing sidecar thumbnail headline: {thumb_headline!r}")
+        data = {**data, "title": thumb_headline}
 
     paths = {}
     if data.get("headline_stat"):

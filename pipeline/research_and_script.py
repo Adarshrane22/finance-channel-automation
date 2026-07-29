@@ -1,44 +1,52 @@
 """
 Stage 1-4 of the pipeline, running as real code instead of the Cowork
-skill: research trending US finance topics, pick the 3 strongest for
-today, fact-check each with real web search, and write full scripts —
-using the Google Gemini API directly (with its built-in Google Search
-grounding tool) so this can run unattended in GitHub Actions with no
-dependency on a Cowork session being open.
+skill: research trending US finance topics, pick the strongest for today,
+fact-check each with real web search, and write full scripts — using the
+Google Gemini API directly (with its built-in Google Search grounding
+tool) so this can run unattended in GitHub Actions with no dependency on
+a Cowork session being open.
 
 This follows the same methodology as the finance-youtube-pipeline Cowork
 skill (see that skill's SKILL.md for the full rationale) — it's
 reimplemented here as an API call because a scheduled GitHub Actions job
 has no access to Cowork's skill runtime, but needs the same research
-discipline: real sources, two-source verification on material claims, and
-the same script structure the rest of the pipeline expects.
+discipline: real sources, multi-source verification on material claims,
+and the same script structure the rest of the pipeline expects.
 
 Why Gemini instead of Claude: Gemini's Flash-tier Google Search grounding
 is free of charge up to 500 requests/day (see
 ai.google.dev/gemini-api/docs/pricing) — a real, no-card-required free
 tier, unlike Anthropic's web_search tool which bills per search plus full
-token cost of every result. This run uses one request/day, so 500 RPD is
-enormous headroom. Trade-off worth knowing: Gemini Flash's research/
-fact-checking judgment is generally a notch below Claude Sonnet on this
-kind of nuanced, compliance-sensitive writing task — worth spot-checking
-the first several days of output more closely than you might with Claude.
+token cost of every result. Trade-off worth knowing: Gemini Flash's
+research/fact-checking judgment is generally a notch below Claude Sonnet
+on this kind of nuanced, compliance-sensitive writing task — worth
+spot-checking output more closely than you might with Claude.
 
 Model availability note: Google has been rolling back which model IDs are
 usable by newly-created API keys faster than their own docs update (a
-known, actively-reported inconsistency — e.g. gemini-2.5-flash returning
-404 "no longer available to new users" for brand-new accounts despite
-being listed as current). Rather than hardcode one model ID and risk it
-silently breaking again, MODEL_CANDIDATES below is tried in order and
-the code moves on to the next on a 404 — see run().
+known, actively-reported inconsistency). MODEL_CANDIDATES is tried in
+order and the code moves on to the next on a 404 — see call_gemini().
 
 Requires: GEMINI_API_KEY environment variable (free key, no card —
 generate one at aistudio.google.com/apikey).
 
-Output: writes N JSON files (one per video, matching the schema
-parse_script.py produces: title, title_options, narration, sections,
-headline_stat, description, tags) directly into the given output
-directory — no markdown intermediate, no separate parsing step needed,
-since there's no human-authored markdown to parse here.
+Two API calls per video, not one:
+  Stage A (run): research + topic selection + fact-check + full script,
+    across all N videos in a single grounded call, exactly as before.
+  Stage B (generate_marketing_package): per video, a second, ungrounded
+    call that turns the finished script into the full SEO/thumbnail/
+    hashtag/shorts/social-post package. Split out from Stage A because
+    cramming both into one call risks truncating the largest, highest-
+    value output (the script itself) against the output token ceiling —
+    keeping them separate makes each call's output size predictable.
+
+Output per video: the parsed script JSON (same shape parse_script.py
+produces — title, title_options, narration, sections, headline_stat,
+description, tags, plus a new topic_strength block) AND a sidecar
+"<stem>_marketing.json" with the Stage B package. select_seo.py and
+generate_thumbnail.py both read the sidecar when present and fall back to
+their original heuristics when it's not — nothing downstream breaks if
+Stage B fails or is skipped.
 
 Usage:
   python research_and_script.py <output_dir> [num_videos] [topic_focus]
@@ -55,9 +63,9 @@ from google.genai import types
 from json_repair import repair_json
 
 # Tried in order; the first one this API key can actually access wins (see
-# run()). All of these are Flash-tier models expected to carry the free
-# 500-requests/day Google Search grounding allowance as of when this was
-# written — check ai.google.dev/gemini-api/docs/pricing if that ever
+# call_gemini()). All of these are Flash-tier models expected to carry the
+# free 500-requests/day Google Search grounding allowance as of when this
+# was written — check ai.google.dev/gemini-api/docs/pricing if that ever
 # changes. Newest-first so a working account gets the best available model.
 MODEL_CANDIDATES = [
     "gemini-2.5-flash-lite",
@@ -71,24 +79,46 @@ MODEL_CANDIDATES = [
 _env_model = os.environ.get("GEMINI_MODEL")
 MODEL_CANDIDATES = [_env_model] if _env_model else MODEL_CANDIDATES
 
-SYSTEM_PROMPT = """You are the research + scriptwriting stage of an automated USA finance YouTube channel's daily pipeline. You produce {n} complete, fact-checked video scripts per run.
+
+# ============================================================================
+# Stage A — research, topic selection, fact-check, script
+# ============================================================================
+
+SYSTEM_PROMPT = """You are an elite team producing an automated USA finance YouTube channel's daily videos: a YouTube Growth Strategist, Senior SEO Expert, Financial Market Analyst, Investigative Journalist, News Fact Checker, Copyright Compliance Expert, and Script Writer working together. You produce {n} complete, fact-checked, highly viral, SEO-optimized, copyright-safe video scripts per run, targeting a United States audience.
 
 Why this matters: this output goes straight into an unattended production pipeline (voiceover, video rendering, thumbnail, and — depending on configuration — automatic YouTube upload) with no human reading the script first. That means the discipline you'd normally apply during a human review step has to happen here, in this call, or it doesn't happen at all.
 
 ## Step 1: Find candidate topics
-Use Google Search to build a shortlist of candidate topics from a spread of sources: recent US financial news (rate decisions, earnings, market moves, policy/tax changes), what's being discussed in personal-finance communities right now, and any seasonally relevant evergreen topics for today's date. Don't rely on your training data for current facts — search for them.
+Use Google Search to build a shortlist from trending US financial news, breaking market updates, investing stories, economy updates, stock market news, crypto, Federal Reserve moves, earnings, AI companies, billionaires, ETFs, recession news, inflation, jobs data, banking, consumer finance, taxes, credit cards, real estate, business acquisitions, and IPOs. Prefer sources like Bloomberg, Reuters, CNBC, Wall Street Journal, MarketWatch, Yahoo Finance, Barron's, SEC filings, the Federal Reserve, US Treasury, Bureau of Labor Statistics, FRED, Nasdaq, NYSE, S&P Global, and company investor-relations pages over lower-quality aggregators. Don't rely on your training data for current facts — search for them.
 
 ## Step 2: Select the {n} strongest ideas
-Favor topics that are genuinely timely, have clear search intent (a normal person would type this into YouTube or Google), and have a specific angle rather than being generic. Prefer variety across the selections — don't pick multiple versions of the same story unless the news genuinely warrants it.
+Only choose topics that are: trending within the last 24-72 hours (or genuinely evergreen when that's the honest fit), have clear search intent (a normal person would type this into YouTube or Google), have high CTR potential, and have a specific angle rather than being generic. Reject topics with weak search volume or a thin, low-stakes story — this channel is optimizing for topics realistically capable of 100,000+ views, not niche curiosities. Prefer variety across the selections — don't pick multiple versions of the same story unless the news genuinely warrants it.
 
 ## Step 3: Fact-check each topic
-Before writing any script, verify every material claim (a number, a date, a policy detail, an attribution) against at least two independent, credible sources using Google Search. This is the single highest-leverage step — a finance channel's credibility rests on not getting numbers wrong, and there's no downstream review step to catch an error here. If a claim can't be verified by two sources, either drop it or clearly hedge it in the script ("early reports suggest...") rather than stating it flatly.
+Before writing any script, verify every material claim (a number, a date, a policy detail, an attribution) against at least three independent, credible sources using Google Search. This is the single highest-leverage step — a finance channel's credibility rests on not getting numbers wrong, and there's no downstream review step to catch an error here. Internally distinguish fact, analysis, prediction, opinion, and rumor as you research — never let speculation read as settled fact. If a claim can't be verified by at least two of your three sources, either drop it or clearly hedge it in the script ("early reports suggest...", "some analysts expect...") rather than stating it flatly. Check dates, company names, stock tickers, and numbers specifically before finalizing.
 
-## Step 4: Write each script
-Hook (10-15 seconds, concrete and specific — a number, a question, or a stakes statement), 3-5 key points with real figures woven in naturally, a short call to action. Target 900-1300 spoken words unless told otherwise.
+## Step 4: Write each script — original, never copied
+Rewrite everything from scratch in your own words. Never reproduce sentences from a source article, and never lift copy from press releases or headlines — summarize the underlying facts and build original storytelling around them. Structure, in this order:
+1. Viral hook (0-15 sec) — concrete and specific: a number, a question, or a stakes statement
+2. Curiosity gap — what's the thing the viewer doesn't know yet that they're about to find out
+3. Why it matters — make the stakes personal/concrete for a US viewer
+4. Background — the context a newcomer to this story needs
+5. Latest update — the actual news, precisely as fact-checked
+6. Financial impact — numbers, in plain terms
+7. Companies affected — named, with their stake in it
+8. Investor reaction — market/analyst response so far
+9. Historical comparison — has something like this happened before, and how did it play out
+10. Expert analysis — attribute every forecast/opinion to whoever holds it
+11. Bull case — the strongest good-news read on this
+12. Bear case — the strongest bad-news read on this
+13. Future scenarios — plausible next developments, clearly labeled as scenarios, not predictions of fact
+14. Key takeaway — the one thing to remember
+15. Strong CTA
+
+Write in conversational American English — no robotic AI wording, no unnecessary jargon (explain any finance term simply the first time it appears), use concrete examples and comparisons. Weave in a retention trigger roughly every 20-30 seconds of runtime — natural phrases like "but here's what nobody noticed...", "the biggest surprise came next...", "investors completely missed this...", "this changes everything..." — placed where they genuinely fit the story beat, not mechanically. Target 8-15 minutes of spoken narration (roughly 1,200-2,300 words) unless told otherwise. Put each of the 15 beats above in its own `sections` entry, named for the beat (e.g. "hook", "curiosity_gap", "why_it_matters", ... "cta").
 
 ## Compliance (apply to every script)
-No personalized directives ("you should buy X") — inform, don't instruct. Every hard number must trace to your two-source verification from Step 3. Attribute opinions/forecasts to whoever holds them rather than presenting them as fact. No absolute promises about outcomes. Include a brief informational-purposes-only framing naturally in the script or description.
+No personalized directives ("you should buy X") — inform, don't instruct. Every hard number must trace to your Step 3 verification. Attribute opinions/forecasts to whoever holds them rather than presenting them as fact. No absolute promises about outcomes. Include a brief informational-purposes-only framing naturally in the script or description. Never suggest reusing copyrighted news footage, charts, or graphics — B-roll should come from original AI-generated illustrations, properly licensed/royalty-free stock footage, public-domain assets, or self-created animations and charts recreated from public data, never lifted from a news broadcast.
 
 ## Output format — CRITICAL
 Once your research, selection, and fact-checking is complete, call the `record_scripts` function exactly once with all {n} finished scripts as its `videos` argument. Do not describe the scripts in plain text — the function call is the only output that reaches the production pipeline. Every section's `text` should be plain narration prose: avoid nested double quotes inside it (write the Fed's dot plot rather than the Fed's "dot plot") since that text flows through several downstream automated steps.
@@ -116,7 +146,7 @@ RECORD_SCRIPTS_SCHEMA = {
                     },
                     "sections": {
                         "type": "array",
-                        "description": "hook, 3-5 key_point_N sections, then cta, in that order.",
+                        "description": "The 15 structural beats, in order: hook, curiosity_gap, why_it_matters, background, latest_update, financial_impact, companies_affected, investor_reaction, historical_comparison, expert_analysis, bull_case, bear_case, future_scenarios, key_takeaway, cta.",
                         "items": {
                             "type": "object",
                             "properties": {
@@ -137,7 +167,18 @@ RECORD_SCRIPTS_SCHEMA = {
                             "properties": {
                                 "claim": {"type": "string"},
                                 "sources": {"type": "array", "items": {"type": "string"}},
+                                "confidence": {"type": "string", "description": "fact | analysis | prediction | opinion | rumor — the honest classification of this claim, not just 'fact' by default."},
                             },
+                        },
+                    },
+                    "topic_strength": {
+                        "type": "object",
+                        "description": "Why this topic was selected, for audit/tuning purposes.",
+                        "properties": {
+                            "trend_recency_hours": {"type": "integer", "description": "Roughly how many hours old the core news is."},
+                            "estimated_view_potential": {"type": "string", "description": "e.g. '100k-300k', '300k+', 'under 50k (evergreen, still worth it because...)'."},
+                            "evergreen_score": {"type": "integer", "description": "0-100: how much this topic will still be relevant/searched a month from now."},
+                            "why_rejected_alternatives": {"type": "string", "description": "Briefly, what weaker candidate topics were considered and passed over, and why."},
                         },
                     },
                 },
@@ -146,6 +187,139 @@ RECORD_SCRIPTS_SCHEMA = {
         },
     },
     "required": ["videos"],
+}
+
+
+# ============================================================================
+# Stage B — SEO / thumbnail / hashtag / shorts / social marketing package
+# ============================================================================
+
+MARKETING_SYSTEM_PROMPT = """You are a YouTube Growth Strategist, Senior SEO Expert, Thumbnail Designer, YouTube Algorithm Specialist, and Social Media Growth Expert. You've been given one finished, already fact-checked US finance video script (title + full narration below). Do not re-research or add new claims — your job is packaging and promotion for a video that already exists, targeting a US YouTube audience.
+
+Video title: {title}
+
+Full narration:
+{narration}
+
+Produce the complete SEO/marketing package by calling `record_marketing_package` exactly once. Guidance:
+- Titles: 5 SEO-optimized variations plus one flagged as best-under-65-characters, plus dedicated curiosity, authority, emotional, and breaking-news angles.
+- Description: first-200-characters hook, then the full SEO description with keywords worked in naturally (never stuffed), a disclaimer, a CTA, and placeholder markers for an affiliate link and a newsletter signup — these are placeholders for the channel owner to fill in, not real links.
+- Hashtags: 15 per category (high-volume, medium-competition, trending, finance-niche, stock-market, investing, US-audience, breaking-news, AI-finance, economy) — note in your response that only a curated 15-20 of these should ever go in one actual video description; a full 150 would read as keyword-stuffing and risks looking spammy to viewers and to YouTube's systems.
+- Tags: a single comma-separated string of YouTube video tags, at or under 500 characters (YouTube's actual tag box limit).
+- Thumbnail: one concrete concept — a short headline (5-7 words max, this is what appears on the 1280x720 image, not the video title), the target emotion, a color-psychology note, a facial-expression suggestion if a face were used, object placement, background treatment, and a predicted CTR score 0-100 with brief reasoning.
+- Shorts: three standalone scripts (60-second, 30-second, 15-second) that work as their own hook-driven mini-stories, not just trimmed narration.
+- Social posts: one each for X (as a thread, numbered), LinkedIn, Facebook, Instagram caption, Threads, and a YouTube Community tab post — each written in the natural voice of that platform, not identical copy pasted six times.
+- Quality scores: your own honest 0-100 self-assessment on seo, ctr, retention, search_intent, trend_strength, competition, evergreen_value, originality, copyright_safety, fact_accuracy, audience_appeal, rpm_potential, monetization_safety, and policy_compliance. Be honest, not maximal — a real 70 is more useful than an inflated 95.
+- Risk flags: list anything in the script you'd want a human to double-check before this publishes (an aggressive claim, a number worth re-verifying, anything borderline on compliance). Empty list only if you genuinely see nothing.
+"""
+
+MARKETING_PACKAGE_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "seo": {
+            "type": "object",
+            "properties": {
+                "primary_keyword": {"type": "string"},
+                "secondary_keywords": {"type": "array", "items": {"type": "string"}},
+                "long_tail_keywords": {"type": "array", "items": {"type": "string"}},
+                "semantic_keywords": {"type": "array", "items": {"type": "string"}},
+                "entity_keywords": {"type": "array", "items": {"type": "string"}},
+                "people_also_search_for": {"type": "array", "items": {"type": "string"}},
+                "trending_queries": {"type": "array", "items": {"type": "string"}},
+                "search_intent": {"type": "string"},
+                "competition_level": {"type": "string", "description": "low | medium | high"},
+                "estimated_difficulty": {"type": "integer", "description": "0-100"},
+                "ctr_suggestion": {"type": "string"},
+                "audience_intent": {"type": "string"},
+                "video_category": {"type": "string"},
+                "evergreen_score": {"type": "integer", "description": "0-100"},
+            },
+        },
+        "titles": {
+            "type": "object",
+            "properties": {
+                "seo_variations": {"type": "array", "items": {"type": "string"}, "description": "5 variations."},
+                "best_under_65_chars": {"type": "string"},
+                "curiosity": {"type": "string"},
+                "authority": {"type": "string"},
+                "emotional": {"type": "string"},
+                "breaking_news": {"type": "string"},
+            },
+        },
+        "description_package": {
+            "type": "object",
+            "properties": {
+                "first_200_chars": {"type": "string"},
+                "full_description": {"type": "string"},
+                "timestamps": {
+                    "type": "array",
+                    "items": {"type": "object", "properties": {"time": {"type": "string"}, "label": {"type": "string"}}},
+                },
+                "disclaimer": {"type": "string"},
+                "cta": {"type": "string"},
+                "affiliate_placeholder": {"type": "string"},
+                "newsletter_placeholder": {"type": "string"},
+            },
+        },
+        "hashtags": {
+            "type": "object",
+            "properties": {
+                "high_volume": {"type": "array", "items": {"type": "string"}},
+                "medium_competition": {"type": "array", "items": {"type": "string"}},
+                "trending": {"type": "array", "items": {"type": "string"}},
+                "finance_niche": {"type": "array", "items": {"type": "string"}},
+                "stock_market": {"type": "array", "items": {"type": "string"}},
+                "investing": {"type": "array", "items": {"type": "string"}},
+                "us_audience": {"type": "array", "items": {"type": "string"}},
+                "breaking_news": {"type": "array", "items": {"type": "string"}},
+                "ai_finance": {"type": "array", "items": {"type": "string"}},
+                "economy": {"type": "array", "items": {"type": "string"}},
+            },
+        },
+        "tags_500_chars": {"type": "string", "description": "Single comma-separated tag string, <=500 characters."},
+        "thumbnail": {
+            "type": "object",
+            "properties": {
+                "headline": {"type": "string"},
+                "emotion": {"type": "string"},
+                "color_psychology": {"type": "string"},
+                "facial_expression": {"type": "string"},
+                "object_placement": {"type": "string"},
+                "background": {"type": "string"},
+                "ctr_score_prediction": {"type": "integer", "description": "0-100"},
+                "ab_test_notes": {"type": "string"},
+            },
+        },
+        "shorts": {
+            "type": "object",
+            "properties": {
+                "sixty_second_script": {"type": "string"},
+                "thirty_second_script": {"type": "string"},
+                "fifteen_second_script": {"type": "string"},
+            },
+        },
+        "social_posts": {
+            "type": "object",
+            "properties": {
+                "x_thread": {"type": "string"},
+                "linkedin_post": {"type": "string"},
+                "facebook_post": {"type": "string"},
+                "instagram_caption": {"type": "string"},
+                "threads_post": {"type": "string"},
+                "community_tab_post": {"type": "string"},
+            },
+        },
+        "quality_scores": {
+            "type": "object",
+            "properties": {k: {"type": "integer", "description": "0-100"} for k in [
+                "seo", "ctr", "retention", "search_intent", "trend_strength", "competition",
+                "evergreen_value", "originality", "copyright_safety", "fact_accuracy",
+                "audience_appeal", "rpm_potential", "monetization_safety", "policy_compliance",
+            ]},
+        },
+        "risk_flags": {"type": "array", "items": {"type": "string"}, "description": "Anything worth a human double-checking before publish. Empty if none."},
+    },
+    "required": ["seo", "titles", "description_package", "hashtags", "tags_500_chars", "thumbnail", "shorts", "social_posts", "quality_scores", "risk_flags"],
 }
 
 
@@ -170,9 +344,40 @@ def extract_json_array(text: str):
         return json.loads(repair_json(candidate))
 
 
-def run(num_videos: int, topic_focus: str):
-    client = genai.Client()  # reads GEMINI_API_KEY (or GOOGLE_API_KEY) from env
+def call_gemini(client, contents, config):
+    """Shared model-fallback loop, used by both Stage A and Stage B calls.
+    Unchanged in behavior from the original single-stage version — still
+    tries each MODEL_CANDIDATES entry in order and moves on on a 404."""
+    response = None
+    last_error = None
+    for model_id in MODEL_CANDIDATES:
+        try:
+            response = client.models.generate_content(model=model_id, contents=contents, config=config)
+            print(f"Used model: {model_id}" + ("" if len(MODEL_CANDIDATES) == 1 else " (via fallback list)"))
+            return response
+        except genai.errors.ClientError as e:
+            if getattr(e, "code", None) == 404:
+                print(f"Model '{model_id}' not available to this account (404) — trying next candidate...")
+                last_error = e
+                continue
+            raise
+    raise RuntimeError(
+        f"None of the candidate Gemini models were available to this API key: {MODEL_CANDIDATES}. "
+        f"Check aistudio.google.com for which models your account can access and set the GEMINI_MODEL "
+        f"repo variable accordingly. Last error: {last_error}"
+    )
 
+
+def extract_function_call(response, function_name):
+    for candidate in response.candidates or []:
+        for part in candidate.content.parts or []:
+            fc = getattr(part, "function_call", None)
+            if fc and fc.name == function_name:
+                return fc.args if isinstance(fc.args, dict) else dict(fc.args)
+    return None
+
+
+def run(client, num_videos: int, topic_focus: str):
     system = SYSTEM_PROMPT.format(
         n=num_videos,
         today=date.today().isoformat(),
@@ -210,50 +415,19 @@ def run(num_videos: int, topic_focus: str):
         # request — without this, the API rejects the call outright with a
         # 400 INVALID_ARGUMENT before any generation even starts.
         tool_config=types.ToolConfig(include_server_side_tool_invocations=True),
-        max_output_tokens=16000,
+        # Bumped up from the original 16000: 8-15 minute scripts (~1,200-
+        # 2,300 words) across up to 3 videos plus citations/topic_strength
+        # metadata can comfortably exceed the old ceiling and get silently
+        # truncated into invalid JSON — 32000 gives real headroom.
+        max_output_tokens=32000,
     )
 
-    # Try each candidate model in order — see the MODEL_CANDIDATES comment
-    # above for why this isn't just one hardcoded model ID. A 404 means
-    # this API key can't use that particular model; anything else (auth,
-    # quota, a real content error) should surface immediately rather than
-    # being masked by a retry loop.
-    response = None
-    last_error = None
-    for model_id in MODEL_CANDIDATES:
-        try:
-            response = client.models.generate_content(
-                model=model_id,
-                contents=f"Research, select, fact-check, and write {num_videos} finance video scripts for today.",
-                config=config,
-            )
-            print(f"Used model: {model_id}" + ("" if len(MODEL_CANDIDATES) == 1 else " (via fallback list)"))
-            break
-        except genai.errors.ClientError as e:
-            if getattr(e, "code", None) == 404:
-                print(f"Model '{model_id}' not available to this account (404) — trying next candidate...")
-                last_error = e
-                continue
-            raise
-    if response is None:
-        raise RuntimeError(
-            f"None of the candidate Gemini models were available to this API key: {MODEL_CANDIDATES}. "
-            f"Check aistudio.google.com for which models your account can access and set the GEMINI_MODEL "
-            f"repo variable accordingly. Last error: {last_error}"
-        )
+    response = call_gemini(client, f"Research, select, fact-check, and write {num_videos} finance video scripts for today.", config)
 
-    videos = None
-    for candidate in response.candidates or []:
-        for part in candidate.content.parts or []:
-            fc = getattr(part, "function_call", None)
-            if fc and fc.name == "record_scripts":
-                args = fc.args if isinstance(fc.args, dict) else dict(fc.args)
-                videos = args.get("videos", [])
-                break
-        if videos is not None:
-            break
-
-    if videos is None:
+    args = extract_function_call(response, "record_scripts")
+    if args is not None:
+        videos = args.get("videos", [])
+    else:
         # Fallback: the model answered in plain text instead of calling
         # record_scripts. Salvage it rather than failing the whole run.
         print("WARNING: model did not call record_scripts — falling back to text parsing.")
@@ -266,6 +440,75 @@ def run(num_videos: int, topic_focus: str):
         print(f"WARNING: requested {num_videos} videos, got {len(videos)}. Proceeding with what was returned.")
 
     return videos
+
+
+def generate_marketing_package(client, title: str, narration: str):
+    """Stage B: turns a finished script into the full SEO/thumbnail/
+    hashtag/shorts/social-post package. No web search needed here (the
+    facts are already verified in Stage A), so this call can safely force
+    the function call via tool_config ANY mode — that forcing is what
+    wasn't reliable when combined with google_search grounding in Stage A,
+    but is fine on its own. Returns None (rather than raising) on failure,
+    since a marketing-package miss shouldn't take down the whole day's
+    video — select_seo.py and generate_thumbnail.py both fall back to
+    their original heuristics when this is missing."""
+    prompt = MARKETING_SYSTEM_PROMPT.format(title=title, narration=narration)
+
+    record_fn = types.FunctionDeclaration(
+        name="record_marketing_package",
+        description="Submit the complete SEO/thumbnail/hashtag/shorts/social marketing package for this video. Call exactly once.",
+        parametersJsonSchema=MARKETING_PACKAGE_SCHEMA,
+    )
+
+    config = types.GenerateContentConfig(
+        tools=[types.Tool(function_declarations=[record_fn])],
+        automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True),
+        tool_config=types.ToolConfig(
+            function_calling_config=types.FunctionCallingConfig(
+                mode=types.FunctionCallingConfigMode.ANY,
+                allowed_function_names=["record_marketing_package"],
+            )
+        ),
+        max_output_tokens=16000,
+    )
+
+    try:
+        response = call_gemini(client, prompt, config)
+    except Exception as e:
+        print(f"WARNING: marketing package generation failed, continuing without it: {e}")
+        return None
+
+    args = extract_function_call(response, "record_marketing_package")
+    if args is None:
+        print("WARNING: model did not call record_marketing_package — no marketing package for this video.")
+        return None
+    return args
+
+
+def curate_hashtags(hashtags: dict, limit=20) -> list:
+    """A full 150-hashtag set (15 per category) is what was generated for
+    reference, but pasting all of them into one video description reads as
+    keyword-stuffing and risks looking spammy — so pick a deduped, capped
+    subset for actual use, prioritizing the categories most specific to
+    this channel (finance/stock-market/investing/breaking-news) before
+    filling in from the broader ones."""
+    if not hashtags:
+        return []
+    priority_order = [
+        "breaking_news", "finance_niche", "stock_market", "investing",
+        "trending", "us_audience", "ai_finance", "economy",
+        "high_volume", "medium_competition",
+    ]
+    seen, curated = set(), []
+    for category in priority_order:
+        for tag in hashtags.get(category, []) or []:
+            key = tag.lower().lstrip("#")
+            if key not in seen:
+                seen.add(key)
+                curated.append(tag if tag.startswith("#") else f"#{tag}")
+            if len(curated) >= limit:
+                return curated
+    return curated
 
 
 def to_parsed_schema(video: dict) -> dict:
@@ -286,6 +529,7 @@ def to_parsed_schema(video: dict) -> dict:
         "tags": video.get("tags", []),
         "word_count": len(narration.split()),
         "citations": video.get("citations", []),
+        "topic_strength": video.get("topic_strength"),
         "generated_at": datetime.now(timezone.utc).isoformat(),
     }
 
@@ -306,7 +550,9 @@ def main():
 
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    videos = run(num_videos, topic_focus)
+    client = genai.Client()  # reads GEMINI_API_KEY (or GOOGLE_API_KEY) from env
+
+    videos = run(client, num_videos, topic_focus)
 
     today_str = date.today().isoformat()
     written = []
@@ -318,6 +564,19 @@ def main():
         path.write_text(json.dumps(parsed, indent=2))
         written.append(str(path))
         print(f"Wrote {path}  ({parsed['word_count']} words, stat={parsed['headline_stat']})")
+
+        marketing = generate_marketing_package(client, parsed["title"], parsed["narration"])
+        if marketing is not None:
+            marketing["curated_hashtags"] = curate_hashtags(marketing.get("hashtags", {}))
+            marketing_path = out_dir / f"{stem}_marketing.json"
+            marketing_path.write_text(json.dumps(marketing, indent=2))
+            print(f"Wrote {marketing_path}")
+            scores = marketing.get("quality_scores", {})
+            low_scores = {k: v for k, v in scores.items() if isinstance(v, (int, float)) and v < 70}
+            if low_scores:
+                print(f"NOTE: self-reported quality scores below 70 for {stem}: {low_scores}")
+            if marketing.get("risk_flags"):
+                print(f"NOTE: risk flags for {stem}: {marketing['risk_flags']}")
 
     manifest_path = out_dir / "manifest.json"
     manifest_path.write_text(json.dumps({"date": today_str, "files": written}, indent=2))

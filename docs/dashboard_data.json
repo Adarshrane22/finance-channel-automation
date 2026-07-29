@@ -1,18 +1,70 @@
 {
-  "last_updated": null,
-  "videos": [],
+  "last_updated": "2026-07-29T06:47:23.680987+00:00",
+  "videos": [
+    {
+      "video_id": "jS5eAJNfwnI",
+      "title": "Fed Meeting July 29: Hike Odds Just Tripled \u2014 Here's What's Driving It",
+      "published_at": "2026-07-29T01:09:29Z",
+      "thumbnail_url": "https://i.ytimg.com/vi/jS5eAJNfwnI/mqdefault.jpg",
+      "views": 4,
+      "likes": 0,
+      "comments": 0,
+      "privacy_status": "public",
+      "ctr_pct": null,
+      "avg_view_duration_s": null,
+      "avg_pct_viewed": null,
+      "url": "https://youtu.be/jS5eAJNfwnI"
+    },
+    {
+      "video_id": "vUtrXmxAryg",
+      "title": "Apple's $5 Trillion Moment vs. the Nasdaq's Chip Meltdown",
+      "published_at": "2026-07-28T23:46:30Z",
+      "thumbnail_url": "https://i.ytimg.com/vi/vUtrXmxAryg/mqdefault.jpg",
+      "views": 1,
+      "likes": 0,
+      "comments": 0,
+      "privacy_status": "public",
+      "ctr_pct": null,
+      "avg_view_duration_s": null,
+      "avg_pct_viewed": null,
+      "url": "https://youtu.be/vUtrXmxAryg"
+    },
+    {
+      "video_id": "RYqV-aAlq4c",
+      "title": "AI Stock Selloff 2026: What's Really Behind the Crash",
+      "published_at": "2026-07-28T19:17:16Z",
+      "thumbnail_url": "https://i.ytimg.com/vi/RYqV-aAlq4c/mqdefault.jpg",
+      "views": 1,
+      "likes": 0,
+      "comments": 0,
+      "privacy_status": "public",
+      "ctr_pct": null,
+      "avg_view_duration_s": null,
+      "avg_pct_viewed": null,
+      "url": "https://youtu.be/RYqV-aAlq4c"
+    }
+  ],
   "recent_totals": {
-    "views": 0,
+    "views": 6,
     "likes": 0,
     "comments": 0,
-    "video_count": 0,
+    "video_count": 3,
     "avg_ctr_pct": null,
     "avg_watch_time_s": null
   },
   "channel_totals": {
-    "subscriber_count": null,
+    "subscriber_count": 0,
     "view_count": 0,
-    "video_count": 0
+    "video_count": 3
   },
-  "history": []
+  "history": [
+    {
+      "date": "2026-07-29",
+      "total_views": 6,
+      "avg_ctr_pct": null,
+      "avg_watch_time_s": null,
+      "channel_view_count": 0,
+      "channel_video_count": 3
+    }
+  ]
 }

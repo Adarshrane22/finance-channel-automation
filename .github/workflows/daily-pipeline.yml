@@ -99,28 +99,31 @@ jobs:
           path: output/
           retention-days: 30
 
-      - name: Publish dashboard + thumbnail performance data
+      - name: Publish dashboard + learning data
         # Commits the refreshed docs/dashboard_data.json (written by
-        # export_dashboard_data.py inside daily_cycle.py), plus the two
-        # new thumbnail-learning files (docs/thumbnail_style_log.json,
-        # appended to by daily_cycle.py after each successful upload, and
+        # export_dashboard_data.py inside daily_cycle.py), the thumbnail-
+        # learning files (docs/thumbnail_style_log.json, appended to by
+        # daily_cycle.py after each successful upload, and
         # docs/thumbnail_style_weights.json, written by the
-        # analyze_performance.py step above) back to the repo, so both the
-        # GitHub Pages dashboard and next run's thumbnail selection always
-        # reflect the latest data without any manual step. Runs even on
-        # partial failure — a partially-successful run still has real data
-        # worth publishing. Silently no-ops if nothing changed (e.g. a
-        # skip_upload dry run, or the very first runs before either
-        # thumbnail-learning file exists yet).
+        # analyze_performance.py step above), and docs/topic_niche_log.json
+        # (appended to by research_and_script.py every run, tracking which
+        # niche — Fed policy, geopolitics, crypto, etc. — each video
+        # covered, so future runs avoid stacking the same niche day after
+        # day) back to the repo, so the GitHub Pages dashboard and the next
+        # run's topic/thumbnail selection always reflect the latest data
+        # without any manual step. Runs even on partial failure — a
+        # partially-successful run still has real data worth publishing.
+        # Silently no-ops if nothing changed (e.g. a skip_upload dry run,
+        # or the very first runs before these files exist yet).
         if: always()
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          for f in docs/dashboard_data.json docs/thumbnail_style_log.json docs/thumbnail_style_weights.json; do
+          for f in docs/dashboard_data.json docs/thumbnail_style_log.json docs/thumbnail_style_weights.json docs/topic_niche_log.json; do
             [ -f "$f" ] && git add "$f"
           done
           if ! git diff --cached --quiet; then
-            git commit -m "Update dashboard + thumbnail performance data [skip ci] ($(date -u +%Y-%m-%d))"
+            git commit -m "Update dashboard + learning data [skip ci] ($(date -u +%Y-%m-%d))"
             git push
           else
             echo "No dashboard/thumbnail data changes to publish."

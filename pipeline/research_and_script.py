@@ -55,12 +55,88 @@ import json
 import os
 import re
 import sys
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
 from google import genai
 from google.genai import types
 from json_repair import repair_json
+
+DOCS_DIR = Path(__file__).resolve().parent.parent / "docs"
+TOPIC_NICHE_LOG_PATH = DOCS_DIR / "topic_niche_log.json"
+NICHE_LOG_LOOKBACK_DAYS = 7
+
+# The full set of niches this channel covers. Kept as an explicit list
+# (rather than leaving topic selection to whatever the model gravitates
+# toward on its own) after real production runs converged twice in a row
+# on Fed-rate-decision stories — without a forcing function, the model's
+# own sense of "what's trending" tends to over-index on whatever the
+# single loudest story of the day is. Geopolitics is deliberately its own
+# named niche (wars, sanctions, tariffs, elections, oil/energy shocks,
+# US-China relations, dollar strength) rather than folded into "economy",
+# since geopolitical events are one of the biggest real drivers of market
+# moves and were previously easy for topic selection to skip past in
+# favor of a more US-domestic-sounding headline.
+NICHES = [
+    "Federal Reserve & Interest Rates",
+    "Stock Market & Indices",
+    "Geopolitics & Global Markets",
+    "Macroeconomic Data",
+    "Crypto & Digital Assets",
+    "Real Estate & Housing",
+    "Banking & Credit",
+    "Corporate News",
+    "Personal Finance & Consumer",
+    "Commodities & Energy",
+    "Big Tech & AI",
+    "Wealth & Billionaires",
+]
+
+
+def load_recent_niches(days_back: int = NICHE_LOG_LOOKBACK_DAYS) -> list:
+    """Reads docs/topic_niche_log.json (appended to by main() after every
+    run) and returns the niches used in the last N days, most recent
+    first. Used to nudge topic selection away from repeating the same
+    niche two days running when the log shows it's been used recently —
+    without this, nothing stops the model picking "Federal Reserve" again
+    just because it's the loudest story two days in a row. Missing/
+    unparseable log just means no history to consider yet — never blocks
+    a run."""
+    if not TOPIC_NICHE_LOG_PATH.exists():
+        return []
+    try:
+        log = json.loads(TOPIC_NICHE_LOG_PATH.read_text())
+    except Exception as e:
+        print(f"WARNING: found {TOPIC_NICHE_LOG_PATH} but couldn't parse it ({e}) — proceeding with no niche history.")
+        return []
+
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=days_back)).date().isoformat()
+    recent = [e for e in log if e.get("published_date", "") >= cutoff]
+    return list(reversed([f"{e.get('published_date', '?')}: {e.get('niche', '?')} ({e.get('title', '?')})" for e in recent]))
+
+
+def append_topic_niche_log(entries: list):
+    """entries: list of {published_date, stem, niche, title}. Best-effort —
+    a logging failure here should never fail an otherwise-successful run.
+    Lives in docs/ so the same GitHub Actions step that already commits
+    docs/dashboard_data.json and the thumbnail-learning files picks this
+    up too."""
+    try:
+        DOCS_DIR.mkdir(parents=True, exist_ok=True)
+        log = []
+        if TOPIC_NICHE_LOG_PATH.exists():
+            try:
+                log = json.loads(TOPIC_NICHE_LOG_PATH.read_text())
+            except Exception:
+                log = []
+        log.extend(entries)
+        # Keep the file from growing unbounded — 90 days is far more than
+        # the 7-day lookback needs, kept as a buffer for manual inspection.
+        cutoff = (datetime.now(timezone.utc) - timedelta(days=90)).date().isoformat()
+        log = [e for e in log if e.get("published_date", "") >= cutoff]
+        TOPIC_NICHE_LOG_PATH.write_text(json.dumps(log, indent=2))
+    except Exception as e:
+        print(f"WARNING: could not append to topic niche log: {e}")
 
 # Tried in order; the first one this API key can actually access wins (see
 # call_gemini()). All of these are Flash-tier models expected to carry the
@@ -88,11 +164,21 @@ SYSTEM_PROMPT = """You are an elite team producing an automated USA finance YouT
 
 Why this matters: this output goes straight into an unattended production pipeline (voiceover, video rendering, thumbnail, and — depending on configuration — automatic YouTube upload) with no human reading the script first. That means the discipline you'd normally apply during a human review step has to happen here, in this call, or it doesn't happen at all.
 
-## Step 1: Find candidate topics
-Use Google Search to build a shortlist from trending US financial news, breaking market updates, investing stories, economy updates, stock market news, crypto, Federal Reserve moves, earnings, AI companies, billionaires, ETFs, recession news, inflation, jobs data, banking, consumer finance, taxes, credit cards, real estate, business acquisitions, and IPOs. Prefer sources like Bloomberg, Reuters, CNBC, Wall Street Journal, MarketWatch, Yahoo Finance, Barron's, SEC filings, the Federal Reserve, US Treasury, Bureau of Labor Statistics, FRED, Nasdaq, NYSE, S&P Global, and company investor-relations pages over lower-quality aggregators. Don't rely on your training data for current facts — search for them.
+## Step 1: Find candidate topics — across ALL of these niches, every run
+This channel covers the full spread of US finance, not just whatever the single loudest headline of the day is. Actively search across every one of these niches before narrowing down, not just the first one or two that come to mind:
+{niche_list}
 
-## Step 2: Select the {n} strongest ideas
-Only choose topics that are: trending within the last 24-72 hours (or genuinely evergreen when that's the honest fit), have clear search intent (a normal person would type this into YouTube or Google), have high CTR potential, and have a specific angle rather than being generic. Reject topics with weak search volume or a thin, low-stakes story — this channel is optimizing for topics realistically capable of 100,000+ views, not niche curiosities. Prefer variety across the selections — don't pick multiple versions of the same story unless the news genuinely warrants it.
+Geopolitics & Global Markets is not optional background color — wars, sanctions, tariffs/trade disputes, elections (US and major foreign economies), oil/energy supply shocks, US-China relations, and dollar/currency moves are among the biggest real drivers of US market moves, and this niche must be genuinely considered every run, not skipped in favor of a more US-domestic-sounding headline.
+
+Use Google Search to build a shortlist spanning as many of these niches as the current news cycle genuinely supports. Prefer sources like Bloomberg, Reuters, CNBC, Wall Street Journal, MarketWatch, Yahoo Finance, Barron's, SEC filings, the Federal Reserve, US Treasury, Bureau of Labor Statistics, FRED, Nasdaq, NYSE, S&P Global, and company investor-relations pages over lower-quality aggregators. Don't rely on your training data for current facts — search for them.
+
+## Step 2: Select the {n} strongest ideas — spread across DIFFERENT niches
+Only choose topics that are: trending within the last 24-72 hours (or genuinely evergreen when that's the honest fit), have clear search intent (a normal person would type this into YouTube or Google), have high CTR potential, and have a specific angle rather than being generic. Reject topics with weak search volume or a thin, low-stakes story — this channel is optimizing for topics realistically capable of 100,000+ views, not niche curiosities.
+
+The {n} selected videos should come from {n} DIFFERENT niches from the list above whenever the news cycle allows it — don't pick two videos that are really just different angles on the same underlying story (e.g. two Fed-rate-decision videos) unless that single story is so dominant that covering it from two genuinely distinct angles is clearly the strongest possible lineup for today. Record which niche each video belongs to in its `niche` field.
+
+Recently covered niches (last {lookback_days} days, most recent first — use this to avoid stacking the same niche again when a comparably strong alternative exists in a different niche; this is a preference, not a hard rule, so a genuinely dominant breaking story can still override it):
+{recent_niches}
 
 ## Step 3: Fact-check each topic
 Before writing any script, verify every material claim (a number, a date, a policy detail, an attribution) against at least three independent, credible sources using Google Search. This is the single highest-leverage step — a finance channel's credibility rests on not getting numbers wrong, and there's no downstream review step to catch an error here. Internally distinguish fact, analysis, prediction, opinion, and rumor as you research — never let speculation read as settled fact. If a claim can't be verified by at least two of your three sources, either drop it or clearly hedge it in the script ("early reports suggest...", "some analysts expect...") rather than stating it flatly. Check dates, company names, stock tickers, and numbers specifically before finalizing.
@@ -140,6 +226,10 @@ RECORD_SCRIPTS_SCHEMA = {
                 "type": "object",
                 "properties": {
                     "title": {"type": "string", "description": "The working title."},
+                    "niche": {
+                        "type": "string",
+                        "description": "Which single niche (from the fixed list in the system prompt, e.g. 'Geopolitics & Global Markets', 'Federal Reserve & Interest Rates') this video most belongs to. Used to track topic variety across days — pick the single best-fitting niche even if a story touches more than one.",
+                    },
                     "title_options": {
                         "type": "array", "items": {"type": "string"},
                         "description": "3 alternative titles.",
@@ -378,10 +468,14 @@ def extract_function_call(response, function_name):
 
 
 def run(client, num_videos: int, topic_focus: str):
+    recent_niches = load_recent_niches()
     system = SYSTEM_PROMPT.format(
         n=num_videos,
         today=date.today().isoformat(),
         topic_focus=topic_focus or "no specific focus — pick the strongest topics across the full range of US finance news",
+        niche_list="\n".join(f"- {niche}" for niche in NICHES),
+        lookback_days=NICHE_LOG_LOOKBACK_DAYS,
+        recent_niches="\n".join(f"- {line}" for line in recent_niches) if recent_niches else "(no history yet)",
     )
 
     record_scripts_fn = types.FunctionDeclaration(
@@ -521,6 +615,7 @@ def to_parsed_schema(video: dict) -> dict:
     return {
         "source_file": "api-generated",
         "title": video["title"],
+        "niche": video.get("niche"),
         "title_options": video.get("title_options", [video["title"]]),
         "narration": narration,
         "sections": video["sections"],
@@ -556,6 +651,7 @@ def main():
 
     today_str = date.today().isoformat()
     written = []
+    niche_log_entries = []
     for video in videos:
         parsed = to_parsed_schema(video)
         slug = slugify(parsed["title"])
@@ -563,7 +659,13 @@ def main():
         path = out_dir / f"{stem}.json"
         path.write_text(json.dumps(parsed, indent=2))
         written.append(str(path))
-        print(f"Wrote {path}  ({parsed['word_count']} words, stat={parsed['headline_stat']})")
+        print(f"Wrote {path}  ({parsed['word_count']} words, stat={parsed['headline_stat']}, niche={parsed.get('niche') or 'unspecified'})")
+        niche_log_entries.append({
+            "published_date": today_str,
+            "stem": stem,
+            "niche": parsed.get("niche") or "unspecified",
+            "title": parsed["title"],
+        })
 
         marketing = generate_marketing_package(client, parsed["title"], parsed["narration"])
         if marketing is not None:
@@ -581,6 +683,10 @@ def main():
     manifest_path = out_dir / "manifest.json"
     manifest_path.write_text(json.dumps({"date": today_str, "files": written}, indent=2))
     print(f"\nWrote manifest: {manifest_path}")
+
+    if niche_log_entries:
+        append_topic_niche_log(niche_log_entries)
+        print(f"Logged {len(niche_log_entries)} niche selection(s) to {TOPIC_NICHE_LOG_PATH} for future-run diversity.")
 
 
 if __name__ == "__main__":

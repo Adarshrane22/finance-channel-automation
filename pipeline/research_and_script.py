@@ -32,8 +32,9 @@ from datetime import date, datetime, timezone
 from pathlib import Path
 
 import anthropic
+from json_repair import repair_json
 
-DEFAULT_MODEL = "claude-opus-4-1-20250805"  # check docs.anthropic.com/en/docs/about-claude/models for the current recommended model — this list changes, and quality here matters since everything downstream depends on it
+DEFAULT_MODEL = "claude-sonnet-5"  # check platform.claude.com/docs/en/about-claude/models for the current recommended model — this list changes, and quality here matters since everything downstream depends on it. Override per-run via the ANTHROPIC_MODEL repo variable (e.g. "claude-opus-5" for higher quality at higher cost) without touching code.
 MODEL = os.environ.get("ANTHROPIC_MODEL", DEFAULT_MODEL)
 
 SYSTEM_PROMPT = """You are the research + scriptwriting stage of an automated USA finance YouTube channel's daily pipeline. You produce {n} complete, fact-checked video scripts per run.
@@ -56,31 +57,73 @@ Hook (10-15 seconds, concrete and specific — a number, a question, or a stakes
 No personalized directives ("you should buy X") — inform, don't instruct. Every hard number must trace to your two-source verification from Step 3. Attribute opinions/forecasts to whoever holds them rather than presenting them as fact. No absolute promises about outcomes. Include a brief informational-purposes-only framing naturally in the script or description.
 
 ## Output format — CRITICAL
-Respond with ONLY a JSON array of exactly {n} objects, no prose before or after, no markdown code fences. Each object must have exactly this shape:
-
-{{
-  "title": "string - the working title",
-  "title_options": ["string", "string", "string"],
-  "sections": [
-    {{"name": "hook", "text": "string", "stat": "string or null - the single most prominent number/stat in this section, if any, e.g. '3.7%' or '$1,200' or '1-in-3'"}},
-    {{"name": "key_point_1", "text": "string", "stat": "string or null"}},
-    {{"name": "key_point_2", "text": "string", "stat": "string or null"}},
-    ... (3-5 key_point_N sections total) ...
-    {{"name": "cta", "text": "string", "stat": null}}
-  ],
-  "description": "string - 2-4 sentences plus an informational-purposes disclaimer, suitable as the YouTube video description",
-  "tags": ["string", "string", ...] (8-12 relevant tags),
-  "citations": [{{"claim": "string", "sources": ["url", "url"]}}, ...] (every material claim from Step 3, for audit purposes — not used by the video renderer but kept for the record)
-}}
+Once your research, selection, and fact-checking is complete, call the `record_scripts` tool exactly once with all {n} finished scripts as its `videos` argument. Do not describe the scripts in plain text — the tool call is the only output that reaches the production pipeline. Every section's `text` should be plain narration prose: avoid nested double quotes inside it (write the Fed's dot plot rather than the Fed's "dot plot") since that text flows through several downstream automated steps.
 
 Today's date is {today}. Topic focus for this run: {topic_focus}
 """
 
+RECORD_SCRIPTS_TOOL = {
+    "name": "record_scripts",
+    "description": "Submit the finished, fact-checked video scripts. Call this exactly once, after research and fact-checking are complete, with every video included.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "videos": {
+                "type": "array",
+                "description": "One entry per finished video script.",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "title": {"type": "string", "description": "The working title."},
+                        "title_options": {
+                            "type": "array", "items": {"type": "string"},
+                            "description": "3 alternative titles.",
+                        },
+                        "sections": {
+                            "type": "array",
+                            "description": "hook, 3-5 key_point_N sections, then cta, in that order.",
+                            "items": {
+                                "type": "object",
+                                "properties": {
+                                    "name": {"type": "string"},
+                                    "text": {"type": "string", "description": "Plain narration prose for this section — avoid nested double quotes."},
+                                    "stat": {"type": ["string", "null"], "description": "The single most prominent number/stat in this section, or null."},
+                                },
+                                "required": ["name", "text"],
+                            },
+                        },
+                        "description": {"type": "string", "description": "2-4 sentences plus an informational-purposes disclaimer, suitable as the YouTube video description."},
+                        "tags": {"type": "array", "items": {"type": "string"}, "description": "8-12 relevant tags."},
+                        "citations": {
+                            "type": "array",
+                            "description": "Every material claim from the fact-checking step, for audit purposes.",
+                            "items": {
+                                "type": "object",
+                                "properties": {
+                                    "claim": {"type": "string"},
+                                    "sources": {"type": "array", "items": {"type": "string"}},
+                                },
+                            },
+                        },
+                    },
+                    "required": ["title", "sections", "description", "tags"],
+                },
+            },
+        },
+        "required": ["videos"],
+    },
+}
+
 
 def extract_json_array(text: str):
-    """Claude occasionally wraps JSON in stray prose or code fences despite
-    instructions — this pulls out the first well-formed JSON array rather
-    than failing the whole run over formatting noise."""
+    """Fallback path only — used if the model ever answers in plain text
+    instead of calling record_scripts (e.g. an older/different model via
+    the ANTHROPIC_MODEL override that doesn't reliably use tools). Claude
+    occasionally wraps JSON in stray prose or code fences, and — the actual
+    bug hit in production — narration text can contain an unescaped nested
+    quote (an em-dash-free "dot plot" style aside) that breaks strict JSON
+    parsing partway through. json_repair fixes both classes of issue rather
+    than failing the whole day's run over a formatting slip."""
     text = text.strip()
     text = re.sub(r"^```(?:json)?\s*", "", text)
     text = re.sub(r"\s*```$", "", text)
@@ -88,7 +131,12 @@ def extract_json_array(text: str):
     end = text.rfind("]")
     if start == -1 or end == -1:
         raise ValueError(f"No JSON array found in model output. First 500 chars: {text[:500]}")
-    return json.loads(text[start:end + 1])
+    candidate = text[start:end + 1]
+    try:
+        return json.loads(candidate)
+    except json.JSONDecodeError as e:
+        print(f"Strict JSON parse failed ({e}); retrying with json_repair...")
+        return json.loads(repair_json(candidate))
 
 
 def run(num_videos: int, topic_focus: str):
@@ -105,22 +153,44 @@ def run(num_videos: int, topic_focus: str):
     # any call that might take that long (non-streaming requests get killed
     # by a client-side timeout ceiling) — .stream() handles that while still
     # giving us one complete assembled response via get_final_message().
+    #
+    # The final answer is a tool call (record_scripts), not free text. This
+    # is the fix for a real production failure: when the scripts were
+    # requested as a raw JSON blob in the response text, Claude would
+    # occasionally include an unescaped nested quote inside narration prose
+    # (e.g. the Fed's "dot plot"), which is perfectly natural English but
+    # invalid inside a JSON string — and the whole day's run failed on a
+    # JSONDecodeError. Tool calls are validated against a schema server-side
+    # before they reach us, so this entire failure class goes away.
+    # tool_choice "any" (rather than "auto") means the model must always
+    # call *some* tool each turn — either web_search while researching, or
+    # record_scripts once it's done — so it can't quietly fall back to a
+    # free-text answer that would skip the schema validation.
     with client.messages.stream(
         model=MODEL,
         max_tokens=16000,
         system=system,
-        tools=[{"type": "web_search_20250305", "name": "web_search", "max_uses": 20}],
+        tools=[
+            {"type": "web_search_20250305", "name": "web_search", "max_uses": 20},
+            RECORD_SCRIPTS_TOOL,
+        ],
+        tool_choice={"type": "any"},
         messages=[{"role": "user", "content": f"Research, select, fact-check, and write {num_videos} finance video scripts for today."}],
     ) as stream:
         response = stream.get_final_message()
 
-    # The final text block carries the JSON; earlier blocks are the model's
-    # search-tool-use turns, which we don't need here (they're visible in
-    # the API dashboard/logs if you want to audit the research process).
-    text_blocks = [b.text for b in response.content if b.type == "text"]
-    if not text_blocks:
-        raise RuntimeError("Model response had no text content — check the raw response for tool-use-only output or an error.")
-    videos = extract_json_array(text_blocks[-1])
+    tool_calls = [b for b in response.content if b.type == "tool_use" and b.name == "record_scripts"]
+    if tool_calls:
+        videos = tool_calls[-1].input.get("videos", [])
+    else:
+        # Fallback: some model configs may still answer in text despite
+        # tool_choice="any" (or ANTHROPIC_MODEL points at one that doesn't
+        # support this tool combo). Salvage it rather than failing outright.
+        print("WARNING: model did not call record_scripts — falling back to text parsing.")
+        text_blocks = [b.text for b in response.content if b.type == "text"]
+        if not text_blocks:
+            raise RuntimeError("Model response had neither a record_scripts tool call nor text content — check the raw response for an error or empty output.")
+        videos = extract_json_array(text_blocks[-1])
 
     if len(videos) != num_videos:
         print(f"WARNING: requested {num_videos} videos, got {len(videos)}. Proceeding with what was returned.")

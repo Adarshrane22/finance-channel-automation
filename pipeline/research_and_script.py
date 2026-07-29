@@ -205,6 +205,11 @@ def run(num_videos: int, topic_focus: str):
         # automatic function calling — otherwise the SDK logs a harmless
         # but confusing "AFC is disabled" warning on every call.
         automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True),
+        # Required whenever a built-in tool (google_search here) is mixed
+        # with a custom function declaration (record_scripts) in the same
+        # request — without this, the API rejects the call outright with a
+        # 400 INVALID_ARGUMENT before any generation even starts.
+        tool_config=types.ToolConfig(include_server_side_tool_invocations=True),
         max_output_tokens=16000,
     )
 

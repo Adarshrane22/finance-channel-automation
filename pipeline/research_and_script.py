@@ -13,7 +13,7 @@ has no access to Cowork's skill runtime, but needs the same research
 discipline: real sources, two-source verification on material claims, and
 the same script structure the rest of the pipeline expects.
 
-Why Gemini instead of Claude: gemini-2.5-flash's Google Search grounding
+Why Gemini instead of Claude: Gemini's Flash-tier Google Search grounding
 is free of charge up to 500 requests/day (see
 ai.google.dev/gemini-api/docs/pricing) — a real, no-card-required free
 tier, unlike Anthropic's web_search tool which bills per search plus full
@@ -22,6 +22,14 @@ enormous headroom. Trade-off worth knowing: Gemini Flash's research/
 fact-checking judgment is generally a notch below Claude Sonnet on this
 kind of nuanced, compliance-sensitive writing task — worth spot-checking
 the first several days of output more closely than you might with Claude.
+
+Model availability note: Google has been rolling back which model IDs are
+usable by newly-created API keys faster than their own docs update (a
+known, actively-reported inconsistency — e.g. gemini-2.5-flash returning
+404 "no longer available to new users" for brand-new accounts despite
+being listed as current). Rather than hardcode one model ID and risk it
+silently breaking again, MODEL_CANDIDATES below is tried in order and
+the code moves on to the next on a 404 — see run().
 
 Requires: GEMINI_API_KEY environment variable (free key, no card —
 generate one at aistudio.google.com/apikey).
@@ -46,8 +54,22 @@ from google import genai
 from google.genai import types
 from json_repair import repair_json
 
-DEFAULT_MODEL = "gemini-2.5-flash"  # free-tier Google Search grounding (500 RPD) — check ai.google.dev/gemini-api/docs/pricing before changing, other models may not have free grounding at all. Override per-run via the GEMINI_MODEL repo variable without touching code.
-MODEL = os.environ.get("GEMINI_MODEL") or DEFAULT_MODEL
+# Tried in order; the first one this API key can actually access wins (see
+# run()). All of these are Flash-tier models expected to carry the free
+# 500-requests/day Google Search grounding allowance as of when this was
+# written — check ai.google.dev/gemini-api/docs/pricing if that ever
+# changes. Newest-first so a working account gets the best available model.
+MODEL_CANDIDATES = [
+    "gemini-2.5-flash-lite",
+    "gemini-2.5-flash",
+    "gemini-flash-latest",
+    "gemini-2.0-flash-001",
+]
+# GEMINI_MODEL (repo variable) pins a single specific model and skips the
+# fallback list entirely — set this once you know which model ID actually
+# works for your account, to avoid a wasted attempt on each run.
+_env_model = os.environ.get("GEMINI_MODEL")
+MODEL_CANDIDATES = [_env_model] if _env_model else MODEL_CANDIDATES
 
 SYSTEM_PROMPT = """You are the research + scriptwriting stage of an automated USA finance YouTube channel's daily pipeline. You produce {n} complete, fact-checked video scripts per run.
 
@@ -178,14 +200,42 @@ def run(num_videos: int, topic_focus: str):
             types.Tool(google_search=types.GoogleSearch()),
             types.Tool(function_declarations=[record_scripts_fn]),
         ],
+        # We parse function calls out of the response ourselves (below)
+        # rather than letting the SDK execute them, so explicitly disable
+        # automatic function calling — otherwise the SDK logs a harmless
+        # but confusing "AFC is disabled" warning on every call.
+        automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True),
         max_output_tokens=16000,
     )
 
-    response = client.models.generate_content(
-        model=MODEL,
-        contents=f"Research, select, fact-check, and write {num_videos} finance video scripts for today.",
-        config=config,
-    )
+    # Try each candidate model in order — see the MODEL_CANDIDATES comment
+    # above for why this isn't just one hardcoded model ID. A 404 means
+    # this API key can't use that particular model; anything else (auth,
+    # quota, a real content error) should surface immediately rather than
+    # being masked by a retry loop.
+    response = None
+    last_error = None
+    for model_id in MODEL_CANDIDATES:
+        try:
+            response = client.models.generate_content(
+                model=model_id,
+                contents=f"Research, select, fact-check, and write {num_videos} finance video scripts for today.",
+                config=config,
+            )
+            print(f"Used model: {model_id}" + ("" if len(MODEL_CANDIDATES) == 1 else " (via fallback list)"))
+            break
+        except genai.errors.ClientError as e:
+            if getattr(e, "code", None) == 404:
+                print(f"Model '{model_id}' not available to this account (404) — trying next candidate...")
+                last_error = e
+                continue
+            raise
+    if response is None:
+        raise RuntimeError(
+            f"None of the candidate Gemini models were available to this API key: {MODEL_CANDIDATES}. "
+            f"Check aistudio.google.com for which models your account can access and set the GEMINI_MODEL "
+            f"repo variable accordingly. Last error: {last_error}"
+        )
 
     videos = None
     for candidate in response.candidates or []:

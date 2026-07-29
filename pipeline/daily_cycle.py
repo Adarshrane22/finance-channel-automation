@@ -48,6 +48,130 @@ def run(cmd, **kwargs):
     subprocess.run(cmd, check=True, **kwargs)
 
 
+SHORTS_SCRIPT_PRIORITY = ["thirty_second_script", "sixty_second_script", "fifteen_second_script"]
+DISCLAIMER = "Informational purposes only, not financial advice."
+
+
+def probe_has_streams(video_path: Path) -> bool:
+    """Lightweight sanity check for a rendered Short — confirms it has
+    both a video and an audio stream and a positive duration. This is
+    deliberately NOT the full quality_check.py gate: that script assumes
+    a 1920x1080 landscape canvas, a matching set of 3 thumbnail variants,
+    and a full SEO json shape, none of which a vertical Short produces.
+    Retrofitting quality_check.py for two different video shapes was more
+    risk to the already-working long-form gate than it was worth for a
+    first version of Shorts support — this is a real, if lighter,
+    automated check rather than no check at all."""
+    try:
+        result = subprocess.run(
+            ["ffprobe", "-v", "error", "-show_entries", "stream=codec_type", "-show_entries", "format=duration", "-of", "json", str(video_path)],
+            capture_output=True, text=True, check=True,
+        )
+        info = json.loads(result.stdout)
+        codec_types = {s.get("codec_type") for s in info.get("streams", [])}
+        duration = float(info.get("format", {}).get("duration", 0))
+        return "video" in codec_types and "audio" in codec_types and duration > 0
+    except Exception as e:
+        print(f"WARNING: could not probe {video_path}: {e}")
+        return False
+
+
+def pick_shorts_script(marketing: dict):
+    """Prefers the 30-second script (a strong sweet spot for a hook-driven
+    finance short — long enough for a real point, short enough to hold
+    attention), falling back to 60s then 15s if that one's missing.
+    Returns (duration_label, text) or (None, None) if the marketing
+    sidecar has no shorts content at all."""
+    shorts = (marketing or {}).get("shorts") or {}
+    for key in SHORTS_SCRIPT_PRIORITY:
+        text = (shorts.get(key) or "").strip()
+        if text:
+            return key.replace("_script", ""), text
+    return None, None
+
+
+def build_short_title(video_title: str, max_len: int = 90) -> str:
+    """Keeps ' #Shorts' in the title — alongside the vertical aspect
+    ratio and sub-3-minute duration, this is one of the signals YouTube
+    uses to route a video into the Shorts shelf/feed rather than treating
+    it as a regular upload, which matters a lot for the reach this is
+    meant to add."""
+    suffix = " #Shorts"
+    base = video_title[: max_len - len(suffix)].rstrip()
+    return f"{base}{suffix}"
+
+
+def process_short_for_video(parsed: dict, marketing: dict, video_dir: Path, stem: str, voice: str, brand_hex: str, video_id, skip_upload: bool):
+    """Builds and (unless skip_upload) uploads a vertical YouTube Short
+    from one of the 30/60/15-second scripts research_and_script.py's
+    Stage B marketing package already wrote — no new research/writing
+    cost, this is a second, shorter edit of content that's already
+    fact-checked. Returns a small info dict, or None if there's no
+    shorts script to work from (an older/failed marketing sidecar) —
+    a missing Short should never fail the main video."""
+    duration_label, narration = pick_shorts_script(marketing)
+    if not narration:
+        print(f"No shorts script available for {stem} (marketing sidecar missing or empty shorts block) — skipping Short.")
+        return None
+
+    short_stem = f"{stem}_short"
+    short_json_path = video_dir / f"{short_stem}.json"
+    short_json_path.write_text(json.dumps({"narration": narration, "title": parsed["title"]}))
+
+    run(["python3", str(PIPELINE_DIR / "generate_voiceover.py"), str(short_json_path), voice, str(video_dir)])
+    short_mp3 = video_dir / f"{short_stem}.mp3"
+    short_captions = video_dir / f"{short_stem}_captions.json"
+
+    short_mp4 = video_dir / f"{short_stem}.mp4"
+    run(["python3", str(PIPELINE_DIR / "assemble_short.py"), str(short_mp3), str(short_captions), str(short_mp4), brand_hex])
+
+    if not probe_has_streams(short_mp4):
+        print(f"WARNING: {short_mp4} failed the basic video/audio stream check — skipping upload for this Short.")
+        return {"stem": short_stem, "video": str(short_mp4), "video_id": None, "duration_variant": duration_label, "skipped_reason": "failed stream check"}
+
+    curated_hashtags = (marketing.get("curated_hashtags") or [])[:8]  # fewer than the main video — Shorts descriptions are read even less than long-form ones
+    desc_parts = [f"{parsed['title']}.", DISCLAIMER]
+    if video_id:
+        desc_parts.append(f"Full video: https://youtu.be/{video_id}")
+    if curated_hashtags:
+        desc_parts.append(" ".join(curated_hashtags))
+    short_seo = {
+        "chosen_title": build_short_title(parsed["title"]),
+        "description": "\n\n".join(desc_parts),
+        "tags": parsed.get("tags", [])[:10],
+    }
+    short_seo_path = video_dir / f"{short_stem}_seo.json"
+    short_seo_path.write_text(json.dumps(short_seo, indent=2))
+
+    short_video_id = None
+    if not skip_upload:
+        delay_hours = float(os.environ.get("PUBLISH_DELAY_HOURS", "6"))
+        publish_at = (datetime.now(timezone.utc) + timedelta(hours=delay_hours)).strftime("%Y-%m-%dT%H:%M:%SZ")
+        result = subprocess.run(
+            # No thumbnail arg (empty string) — Shorts don't support custom
+            # thumbnails the same way long-form videos do; YouTube picks a
+            # frame automatically. upload_video.py already handles an
+            # empty/nonexistent thumbnail path gracefully.
+            ["python3", str(PIPELINE_DIR / "upload_video.py"), str(short_mp4), "", str(short_seo_path), publish_at],
+            capture_output=True, text=True,
+        )
+        print(result.stdout)
+        if result.returncode != 0:
+            print(result.stderr, file=sys.stderr)
+            print(f"WARNING: Short upload failed for {short_stem} — main video upload already succeeded, so this is logged, not raised.")
+        else:
+            for line in result.stdout.splitlines():
+                if "Video ID:" in line:
+                    short_video_id = line.split("Video ID:")[1].split()[0]
+
+    return {
+        "stem": short_stem,
+        "video": str(short_mp4),
+        "video_id": short_video_id,
+        "duration_variant": duration_label,
+    }
+
+
 def append_thumbnail_style_log(entry: dict):
     """Records which thumbnail style actually got uploaded for a video,
     keyed by video_id, so analyze_performance.py can later join it
@@ -172,7 +296,29 @@ def process_one_video(parsed_json_path: Path, out_dir: Path, voice: str, brand_h
                 "uploaded_at": datetime.now(timezone.utc).isoformat(),
             })
 
-    return {"stem": stem, "video": str(final_mp4), "thumbnail": str(thumbnail_path), "thumbnail_style": thumbnail_style, "video_id": video_id}
+    # Fully-automated YouTube Short, built from the same fact-checked
+    # content as the long-form video — see process_short_for_video's
+    # docstring. Runs after the main video's upload (even in skip_upload
+    # dry runs, it still renders for QA, just doesn't upload) so it can
+    # link back to the full video once a video_id exists. A Short failing
+    # here is logged, never raised — the main video for the day already
+    # succeeded and that's what matters most.
+    short_info = None
+    marketing_path = parsed_json_path.with_name(parsed_json_path.stem + "_marketing.json")
+    if marketing_path.exists():
+        try:
+            parsed = json.loads(parsed_json_path.read_text())
+            marketing = json.loads(marketing_path.read_text())
+            short_info = process_short_for_video(parsed, marketing, video_dir, stem, voice, brand_hex, video_id, skip_upload)
+        except Exception as e:
+            print(f"WARNING: Short generation failed for {stem}, continuing without it: {e}")
+    else:
+        print(f"No marketing sidecar for {stem} — skipping Short (only the main video's title/tags exist, no shorts script to build from).")
+
+    return {
+        "stem": stem, "video": str(final_mp4), "thumbnail": str(thumbnail_path),
+        "thumbnail_style": thumbnail_style, "video_id": video_id, "short": short_info,
+    }
 
 
 def main():

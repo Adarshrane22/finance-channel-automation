@@ -1,6 +1,20 @@
 {
-  "last_updated": "2026-07-29T06:47:23.680987+00:00",
+  "last_updated": "2026-07-29T08:55:21.660631+00:00",
   "videos": [
+    {
+      "video_id": "9vML-YFOf6E",
+      "title": "US Housing Market & Fed Rate Decision July 2026: Critical Updates",
+      "published_at": "2026-07-29T06:47:16Z",
+      "thumbnail_url": "https://i9.ytimg.com/vi/9vML-YFOf6E/mqdefault.jpg?sqp=COT_ptMG&rs=AOn4CLAnRLFPBFcMX92a_aoCuMwqwVRj0Q",
+      "views": 1,
+      "likes": 0,
+      "comments": 0,
+      "privacy_status": "private",
+      "ctr_pct": null,
+      "avg_view_duration_s": null,
+      "avg_pct_viewed": null,
+      "url": "https://youtu.be/9vML-YFOf6E"
+    },
     {
       "video_id": "jS5eAJNfwnI",
       "title": "Fed Meeting July 29: Hike Odds Just Tripled \u2014 Here's What's Driving It",
@@ -45,10 +59,10 @@
     }
   ],
   "recent_totals": {
-    "views": 6,
+    "views": 7,
     "likes": 0,
     "comments": 0,
-    "video_count": 3,
+    "video_count": 4,
     "avg_ctr_pct": null,
     "avg_watch_time_s": null
   },
@@ -60,7 +74,7 @@
   "history": [
     {
       "date": "2026-07-29",
-      "total_views": 6,
+      "total_views": 7,
       "avg_ctr_pct": null,
       "avg_watch_time_s": null,
       "channel_view_count": 0,

@@ -33,7 +33,7 @@ from pathlib import Path
 
 import anthropic
 
-DEFAULT_MODEL = "claude-sonnet-5"  # updated: old opus-4.1 ID was retired
+DEFAULT_MODEL = "claude-opus-4-1-20250805"  # check docs.anthropic.com/en/docs/about-claude/models for the current recommended model — this list changes, and quality here matters since everything downstream depends on it
 MODEL = os.environ.get("ANTHROPIC_MODEL", DEFAULT_MODEL)
 
 SYSTEM_PROMPT = """You are the research + scriptwriting stage of an automated USA finance YouTube channel's daily pipeline. You produce {n} complete, fact-checked video scripts per run.

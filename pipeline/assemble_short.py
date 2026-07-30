@@ -24,11 +24,20 @@ Usage:
 word_events.json is the same format generate_voiceover.py already
 produces (a list of {text, start_s, duration_s}) — this script doesn't
 care whether the audio came from a full script or a short one.
+
+Optional --broll <path.mp4> uses a single portrait stock clip (fetched
+by fetch_broll.py's --vertical mode) as the background instead of the
+plain animated gradient, dimmed the same way assemble_video.py dims its
+landscape B-roll so captions stay readable. A Short is one continuous
+narration rather than sectioned like a long-form video, so one clip
+covers the whole thing (looped or trimmed to fit) rather than one clip
+per section. Missing/unreadable file just falls back to the gradient —
+same graceful-degradation contract as the rest of the B-roll system.
 """
 import sys
 from pathlib import Path
 
-from moviepy import AudioFileClip, CompositeVideoClip, VideoClip
+from moviepy import AudioFileClip, CompositeVideoClip, ImageClip, VideoClip, VideoFileClip, vfx
 from PIL import Image, ImageDraw, ImageFont
 import numpy as np
 import json
@@ -70,6 +79,37 @@ def build_background(duration: float, brand_rgb) -> VideoClip:
         return frame.astype(np.uint8)
 
     return VideoClip(make_frame, duration=duration)
+
+
+def build_broll_background(broll_path, duration: float):
+    """Loads a single portrait clip, loops/trims it to exactly fill the
+    Short's duration, fill-crops it to the 1080x1920 canvas regardless of
+    the source clip's native size (Pexels portrait footage varies), and
+    dims it so white captions stay readable — the same technique
+    assemble_video.py uses per-section, just for the whole clip at once
+    since a Short isn't broken into sections. Returns None on any
+    failure (missing file, bad codec, etc.) so the caller can fall back
+    to the plain gradient without the whole render failing."""
+    if not broll_path or not Path(broll_path).exists():
+        return None
+    try:
+        raw = VideoFileClip(str(broll_path)).without_audio()
+        if raw.duration < duration:
+            raw = raw.with_effects([vfx.Loop(duration=duration)])
+        else:
+            raw = raw.subclipped(0, duration)
+
+        # Fill-crop to the full 1080x1920 portrait canvas.
+        raw = raw.with_effects([vfx.Resize(width=WIDTH)])
+        if raw.h < HEIGHT:
+            raw = raw.with_effects([vfx.Resize(height=HEIGHT)])
+        raw = raw.with_effects([vfx.Crop(x_center=raw.w / 2, y_center=raw.h / 2, width=WIDTH, height=HEIGHT)])
+
+        dim = ImageClip(np.zeros((HEIGHT, WIDTH, 3), dtype=np.uint8)).with_duration(duration).with_opacity(0.4)
+        return CompositeVideoClip([raw, dim], size=(WIDTH, HEIGHT)).with_duration(duration)
+    except Exception as e:
+        print(f"  B-roll: WARNING: failed to prepare vertical clip {broll_path}: {e} — using gradient background instead.")
+        return None
 
 
 def group_words(word_events, words_per_line=WORDS_PER_LINE):
@@ -220,14 +260,20 @@ def build_follow_endcard(total_duration: float, hold_s: float = 2.2) -> VideoCli
     return clip.with_mask(mask)
 
 
-def assemble(audio_path: str, word_events_path: str, out_path: str, brand_hex: str = "1F6FEB", draft: bool = False):
+def assemble(audio_path: str, word_events_path: str, out_path: str, brand_hex: str = "1F6FEB",
+             draft: bool = False, broll_path: str = None):
     brand_rgb = hex_to_rgb(brand_hex)
     audio = AudioFileClip(audio_path)
     duration = audio.duration
 
     word_events = json.loads(Path(word_events_path).read_text())
 
-    background = build_background(duration, brand_rgb)
+    background = build_broll_background(broll_path, duration)
+    if background is None:
+        print("  B-roll: no usable vertical clip — gradient background only.")
+        background = build_background(duration, brand_rgb)
+    else:
+        print(f"  B-roll: using {broll_path} as the Short's background.")
     caption_clips = build_karaoke_captions(word_events, duration)
     watermark = build_watermark(duration)
     endcard = build_follow_endcard(duration)
@@ -247,15 +293,23 @@ def assemble(audio_path: str, word_events_path: str, out_path: str, brand_hex: s
 
 def main():
     if len(sys.argv) < 4:
-        print("Usage: python assemble_short.py <audio.mp3> <word_events.json> <output.mp4> [brand_hex] [--draft]")
+        print("Usage: python assemble_short.py <audio.mp3> <word_events.json> <output.mp4> [brand_hex] [--draft] [--broll <path.mp4>]")
         sys.exit(1)
     audio_path, word_events_path, out_path = sys.argv[1:4]
     rest = sys.argv[4:]
+
     draft = "--draft" in rest
     rest = [a for a in rest if a != "--draft"]
+
+    broll_path = None
+    if "--broll" in rest:
+        i = rest.index("--broll")
+        broll_path = rest[i + 1]
+        rest = rest[:i] + rest[i + 2:]
+
     brand_hex = rest[0] if rest else "1F6FEB"
 
-    assemble(audio_path, word_events_path, out_path, brand_hex, draft)
+    assemble(audio_path, word_events_path, out_path, brand_hex, draft, broll_path)
 
 
 if __name__ == "__main__":

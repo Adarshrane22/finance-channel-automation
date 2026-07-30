@@ -122,8 +122,18 @@ def process_short_for_video(parsed: dict, marketing: dict, video_dir: Path, stem
     short_mp3 = video_dir / f"{short_stem}.mp3"
     short_captions = video_dir / f"{short_stem}_captions.json"
 
+    # Fetch one portrait Pexels clip for the whole narration — same
+    # graceful-degradation contract as the long-form video's B-roll: no
+    # PEXELS_API_KEY or no usable match just means assemble_short.py
+    # falls back to its gradient background, this never fails the run.
+    run(["python3", str(PIPELINE_DIR / "fetch_broll.py"), "--vertical", str(short_json_path), str(video_dir)])
+    short_broll = video_dir / "broll_vertical.mp4"
+
     short_mp4 = video_dir / f"{short_stem}.mp4"
-    run(["python3", str(PIPELINE_DIR / "assemble_short.py"), str(short_mp3), str(short_captions), str(short_mp4), brand_hex])
+    assemble_cmd = ["python3", str(PIPELINE_DIR / "assemble_short.py"), str(short_mp3), str(short_captions), str(short_mp4), brand_hex]
+    if short_broll.exists():
+        assemble_cmd += ["--broll", str(short_broll)]
+    run(assemble_cmd)
 
     if not probe_has_streams(short_mp4):
         print(f"WARNING: {short_mp4} failed the basic video/audio stream check — skipping upload for this Short.")

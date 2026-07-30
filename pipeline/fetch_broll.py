@@ -28,6 +28,20 @@ PEXELS_API_KEY isn't set, or a given section's search returns nothing
 usable, that section just keeps assemble_video.py's gradient background
 instead of failing the run — B-roll is an enhancement layered on top of
 a pipeline that already works without it.
+
+Also supports a second, vertical mode for YouTube Shorts:
+
+  python fetch_broll.py --vertical <short.json> <output_dir>
+
+<short.json> is the same small {"narration": ..., "title": ...} file
+daily_cycle.py already writes for a Short before generating its
+voiceover. Unlike the landscape mode (one clip per script section),
+a Short is one continuous narration, so this fetches a single portrait
+(9:16) clip sized off the whole narration's keywords and writes it to
+<output_dir>/broll_vertical.mp4 plus a matching
+<output_dir>/broll_vertical_credits.json — same graceful-degradation
+rule: no key or no usable result just means assemble_short.py falls
+back to its gradient background, never a failed run.
 """
 import json
 import os
@@ -40,6 +54,12 @@ import requests
 PEXELS_SEARCH_URL = "https://api.pexels.com/videos/search"
 MIN_WIDTH = 1920
 MIN_HEIGHT = 1080
+# Portrait clips run smaller on Pexels than landscape — 1080x1920 "large"
+# hits are rarer, so the vertical search accepts anything reasonably
+# HD-ish and lets assemble_short.py's fill-crop handle the rest, the same
+# way it already handles varying source aspect ratios.
+VERTICAL_MIN_WIDTH = 720
+VERTICAL_MIN_HEIGHT = 1280
 
 STOPWORDS = {
     "the", "a", "an", "and", "or", "but", "of", "to", "in", "on", "for", "with",
@@ -50,14 +70,12 @@ STOPWORDS = {
 }
 
 
-def keywords_for_section(section: dict, title: str) -> str:
-    """Crude but effective: pull the first few distinct, meaningful words
-    out of the section's own text (falling back to the title) rather than
-    anything more elaborate — Pexels' search is forgiving of a short,
-    generic-ish query, and this avoids an extra API call to have a model
-    generate a proper search phrase for every section of every video."""
-    text = section.get("text", "") or title
-    words = re.findall(r"[A-Za-z]{4,}", text.lower())
+def keywords_from_text(text: str, fallback: str = "finance business") -> str:
+    """Shared keyword extraction: pull the first few distinct, meaningful
+    words out of a chunk of text — Pexels' search is forgiving of a
+    short, generic-ish query, and this avoids an extra API call to have a
+    model generate a proper search phrase for every section/short."""
+    words = re.findall(r"[A-Za-z]{4,}", (text or "").lower())
     words = [w for w in words if w not in STOPWORDS]
     seen = []
     for w in words:
@@ -65,15 +83,25 @@ def keywords_for_section(section: dict, title: str) -> str:
             seen.append(w)
         if len(seen) >= 3:
             break
-    return " ".join(seen) if seen else "finance business"
+    return " ".join(seen) if seen else fallback
 
 
-def search_and_pick(query: str, api_key: str):
+def keywords_for_section(section: dict, title: str) -> str:
+    """Crude but effective: pull the first few distinct, meaningful words
+    out of the section's own text (falling back to the title) rather than
+    anything more elaborate — Pexels' search is forgiving of a short,
+    generic-ish query, and this avoids an extra API call to have a model
+    generate a proper search phrase for every section of every video."""
+    return keywords_from_text(section.get("text", "") or title)
+
+
+def search_and_pick(query: str, api_key: str, orientation: str = "landscape",
+                     min_width: int = MIN_WIDTH, min_height: int = MIN_HEIGHT):
     try:
         resp = requests.get(
             PEXELS_SEARCH_URL,
             headers={"Authorization": api_key},
-            params={"query": query, "orientation": "landscape", "size": "large", "per_page": 5},
+            params={"query": query, "orientation": orientation, "size": "large", "per_page": 5},
             timeout=20,
         )
         resp.raise_for_status()
@@ -86,8 +114,8 @@ def search_and_pick(query: str, api_key: str):
         files = sorted(
             (
                 f for f in video.get("video_files", [])
-                if f.get("width", 0) >= MIN_WIDTH
-                and f.get("height", 0) >= MIN_HEIGHT
+                if f.get("width", 0) >= min_width
+                and f.get("height", 0) >= min_height
                 and f.get("file_type") == "video/mp4"
             ),
             key=lambda f: f["width"],
@@ -111,9 +139,62 @@ def download(url: str, out_path: Path):
                 f.write(chunk)
 
 
+def fetch_vertical(short_json_path: Path, out_dir: Path):
+    """Fetches a single portrait clip for a whole Short's narration and
+    writes broll_vertical.mp4 + broll_vertical_credits.json into out_dir.
+    Mirrors the landscape flow's graceful-degradation behavior: any miss
+    (no key, no search match, download failure) just leaves those files
+    absent/empty and assemble_short.py keeps its gradient background."""
+    out_dir.mkdir(parents=True, exist_ok=True)
+    credits_path = out_dir / "broll_vertical_credits.json"
+
+    api_key = os.environ.get("PEXELS_API_KEY")
+    if not api_key:
+        print("PEXELS_API_KEY not set — Short will use the gradient background only.")
+        credits_path.write_text(json.dumps([]))
+        return
+
+    short = json.loads(short_json_path.read_text())
+    query = keywords_from_text(short.get("narration") or short.get("title"))
+    print(f"Short B-roll: searching Pexels (portrait) for '{query}'")
+
+    pick = search_and_pick(query, api_key, orientation="portrait",
+                            min_width=VERTICAL_MIN_WIDTH, min_height=VERTICAL_MIN_HEIGHT)
+    if not pick:
+        print("  no usable portrait result — Short keeps the gradient background")
+        credits_path.write_text(json.dumps([]))
+        return
+
+    out_path = out_dir / "broll_vertical.mp4"
+    try:
+        download(pick["url"], out_path)
+    except Exception as e:
+        print(f"  WARNING: download failed for vertical B-roll: {e}")
+        credits_path.write_text(json.dumps([]))
+        return
+
+    print(f"  downloaded broll_vertical.mp4 (credit: {pick['photographer']})")
+    credits_path.write_text(json.dumps([{
+        "file": "broll_vertical.mp4",
+        "source": "Pexels",
+        "license": "Pexels License - free to use, no attribution legally required (https://www.pexels.com/license/)",
+        "photographer": pick["photographer"],
+        "photographer_url": pick["photographer_url"],
+        "pexels_page_url": pick["pexels_page_url"],
+    }], indent=2))
+
+
 def main():
+    if len(sys.argv) >= 2 and sys.argv[1] == "--vertical":
+        if len(sys.argv) < 4:
+            print("Usage: python fetch_broll.py --vertical <short.json> <output_dir>")
+            sys.exit(1)
+        fetch_vertical(Path(sys.argv[2]), Path(sys.argv[3]))
+        return
+
     if len(sys.argv) < 3:
         print("Usage: python fetch_broll.py <parsed_script.json> <output_dir>")
+        print("       python fetch_broll.py --vertical <short.json> <output_dir>")
         sys.exit(1)
 
     parsed_path = Path(sys.argv[1])

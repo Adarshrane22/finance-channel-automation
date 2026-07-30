@@ -1,6 +1,62 @@
 {
-  "last_updated": "2026-07-29T15:06:59.300761+00:00",
+  "last_updated": "2026-07-30T18:20:28.329380+00:00",
   "videos": [
+    {
+      "video_id": "Vkf57WcyDGg",
+      "title": "Big Tech's $725 Billion AI Trap: Nvidia Crashes as Apple Takes $5 Trillion Crown #Shorts",
+      "published_at": "2026-07-30T12:03:13Z",
+      "thumbnail_url": "https://i.ytimg.com/vi/Vkf57WcyDGg/mqdefault.jpg",
+      "views": 1,
+      "likes": 0,
+      "comments": 0,
+      "privacy_status": "public",
+      "ctr_pct": null,
+      "avg_view_duration_s": null,
+      "avg_pct_viewed": null,
+      "url": "https://youtu.be/Vkf57WcyDGg"
+    },
+    {
+      "video_id": "JyfDcp58X8s",
+      "title": "Why Big Tech's $725 Billion AI Spending Triggered a Tech Stock Selloff",
+      "published_at": "2026-07-30T12:01:08Z",
+      "thumbnail_url": "https://i.ytimg.com/vi/JyfDcp58X8s/mqdefault.jpg",
+      "views": 0,
+      "likes": 0,
+      "comments": 0,
+      "privacy_status": "public",
+      "ctr_pct": null,
+      "avg_view_duration_s": null,
+      "avg_pct_viewed": null,
+      "url": "https://youtu.be/JyfDcp58X8s"
+    },
+    {
+      "video_id": "BWqBCoyGNFk",
+      "title": "Why 3 Fed Members Voted for an Interest Rate Hike Today",
+      "published_at": "2026-07-30T01:38:34Z",
+      "thumbnail_url": "https://i.ytimg.com/vi/BWqBCoyGNFk/mqdefault.jpg",
+      "views": 1,
+      "likes": 0,
+      "comments": 0,
+      "privacy_status": "public",
+      "ctr_pct": null,
+      "avg_view_duration_s": null,
+      "avg_pct_viewed": null,
+      "url": "https://youtu.be/BWqBCoyGNFk"
+    },
+    {
+      "video_id": "4jogYZkITcE",
+      "title": "Fed Rate Shock & $700B AI Capex Crisis: Why Tech Stocks Are Crashing",
+      "published_at": "2026-07-29T15:37:20Z",
+      "thumbnail_url": "https://i.ytimg.com/vi/4jogYZkITcE/mqdefault.jpg",
+      "views": 12,
+      "likes": 0,
+      "comments": 0,
+      "privacy_status": "public",
+      "ctr_pct": null,
+      "avg_view_duration_s": null,
+      "avg_pct_viewed": null,
+      "url": "https://youtu.be/4jogYZkITcE"
+    },
     {
       "video_id": "9vML-YFOf6E",
       "title": "US Housing Market & Fed Rate Decision July 2026: Critical Updates",
@@ -20,7 +76,7 @@
       "title": "Fed Rate Decision & $1.53T Margin Debt: Tech Stock Sell-off Ahead?",
       "published_at": "2026-07-29T09:20:38Z",
       "thumbnail_url": "https://i.ytimg.com/vi/pqF53y-xgrI/mqdefault.jpg",
-      "views": 2,
+      "views": 3,
       "likes": 0,
       "comments": 0,
       "privacy_status": "public",
@@ -62,7 +118,7 @@
       "title": "AI Stock Selloff 2026: What's Really Behind the Crash",
       "published_at": "2026-07-28T19:17:16Z",
       "thumbnail_url": "https://i.ytimg.com/vi/RYqV-aAlq4c/mqdefault.jpg",
-      "views": 1,
+      "views": 2,
       "likes": 0,
       "comments": 0,
       "privacy_status": "public",
@@ -73,17 +129,17 @@
     }
   ],
   "recent_totals": {
-    "views": 9,
+    "views": 25,
     "likes": 0,
     "comments": 0,
-    "video_count": 5,
+    "video_count": 9,
     "avg_ctr_pct": null,
     "avg_watch_time_s": null
   },
   "channel_totals": {
     "subscriber_count": 0,
-    "view_count": 0,
-    "video_count": 5
+    "view_count": 20,
+    "video_count": 9
   },
   "history": [
     {
@@ -93,6 +149,14 @@
       "avg_watch_time_s": null,
       "channel_view_count": 0,
       "channel_video_count": 5
+    },
+    {
+      "date": "2026-07-30",
+      "total_views": 25,
+      "avg_ctr_pct": null,
+      "avg_watch_time_s": null,
+      "channel_view_count": 20,
+      "channel_video_count": 9
     }
   ]
 }

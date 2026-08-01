@@ -1,12 +1,110 @@
 {
-  "last_updated": "2026-07-30T18:20:28.329380+00:00",
+  "last_updated": "2026-08-01T06:36:49.035170+00:00",
   "videos": [
+    {
+      "video_id": "FxT_lAZb02k",
+      "title": "Why Home Prices Hit Record $440,600 Despite 6.66% Mortgage Rates",
+      "published_at": "2026-08-01T06:32:20Z",
+      "thumbnail_url": "https://i9.ytimg.com/vi/FxT_lAZb02k/mqdefault.jpg?sqp=CJSnttMG&rs=AOn4CLBBUWolN708YJJKojLQ8HUDRPnXmA",
+      "views": 0,
+      "likes": 0,
+      "comments": 0,
+      "privacy_status": "private",
+      "ctr_pct": null,
+      "avg_view_duration_s": null,
+      "avg_pct_viewed": null,
+      "url": "https://youtu.be/FxT_lAZb02k"
+    },
+    {
+      "video_id": "X5DVGaBgSBw",
+      "title": "Microsoft's $450 Billion Explosion vs Meta's Cash Crisis: Big Tech's AI Winner Rev #Shorts",
+      "published_at": "2026-08-01T05:50:42Z",
+      "thumbnail_url": "https://i9.ytimg.com/vi/X5DVGaBgSBw/mqdefault.jpg?sqp=CJSnttMG&rs=AOn4CLB48vGo_n9WgNRJMGQhdxaitiDW1Q",
+      "views": 0,
+      "likes": 0,
+      "comments": 0,
+      "privacy_status": "private",
+      "ctr_pct": null,
+      "avg_view_duration_s": null,
+      "avg_pct_viewed": null,
+      "url": "https://youtu.be/X5DVGaBgSBw"
+    },
+    {
+      "video_id": "Pura2uh7ynE",
+      "title": "Why Microsoft Stock Jumped 15% While Meta Free Cash Flow Cratered 91%",
+      "published_at": "2026-08-01T05:45:08Z",
+      "thumbnail_url": "https://i9.ytimg.com/vi/Pura2uh7ynE/mqdefault.jpg?sqp=CJSnttMG&rs=AOn4CLDGRtvBdGiHsZVOMF8crJJr-cRvyg",
+      "views": 0,
+      "likes": 0,
+      "comments": 0,
+      "privacy_status": "private",
+      "ctr_pct": null,
+      "avg_view_duration_s": null,
+      "avg_pct_viewed": null,
+      "url": "https://youtu.be/Pura2uh7ynE"
+    },
+    {
+      "video_id": "FMeCDyYcZqg",
+      "title": "The Fed's 9-3 Rebellion: Why 3 Fed Presidents Are Demanding an Immediate Rate Hike #Shorts",
+      "published_at": "2026-08-01T05:00:47Z",
+      "thumbnail_url": "https://i9.ytimg.com/vi/FMeCDyYcZqg/mqdefault.jpg?sqp=CJSnttMG&rs=AOn4CLC-mM9OhE3vu4BoPWaUV3s67ulvRQ",
+      "views": 0,
+      "likes": 0,
+      "comments": 0,
+      "privacy_status": "private",
+      "ctr_pct": null,
+      "avg_view_duration_s": null,
+      "avg_pct_viewed": null,
+      "url": "https://youtu.be/FMeCDyYcZqg"
+    },
+    {
+      "video_id": "fZ4Dsi4H3Jk",
+      "title": "The Fed's 9-3 Rebellion: Why Interest Rate Hikes May Return in September",
+      "published_at": "2026-08-01T04:55:42Z",
+      "thumbnail_url": "https://i9.ytimg.com/vi/fZ4Dsi4H3Jk/mqdefault.jpg?sqp=CJSnttMG&rs=AOn4CLDm7vtbqU0Q4-ud5VIM3ZPd5T-ktQ",
+      "views": 0,
+      "likes": 0,
+      "comments": 0,
+      "privacy_status": "private",
+      "ctr_pct": null,
+      "avg_view_duration_s": null,
+      "avg_pct_viewed": null,
+      "url": "https://youtu.be/fZ4Dsi4H3Jk"
+    },
+    {
+      "video_id": "66R3ff4ME-w",
+      "title": "Microsoft's $60 Surge Saves Wall Street: Inside MSFT's Massive Blowout and Tech Re #Shorts",
+      "published_at": "2026-07-31T11:31:04Z",
+      "thumbnail_url": "https://i.ytimg.com/vi/66R3ff4ME-w/mqdefault.jpg",
+      "views": 0,
+      "likes": 0,
+      "comments": 0,
+      "privacy_status": "public",
+      "ctr_pct": null,
+      "avg_view_duration_s": null,
+      "avg_pct_viewed": null,
+      "url": "https://youtu.be/66R3ff4ME-w"
+    },
+    {
+      "video_id": "e4CCkNt8OIg",
+      "title": "Microsoft AI Earnings Blowout: What It Means for S&P 500 & Nasdaq",
+      "published_at": "2026-07-31T11:26:21Z",
+      "thumbnail_url": "https://i.ytimg.com/vi/e4CCkNt8OIg/mqdefault.jpg",
+      "views": 0,
+      "likes": 0,
+      "comments": 0,
+      "privacy_status": "public",
+      "ctr_pct": null,
+      "avg_view_duration_s": null,
+      "avg_pct_viewed": null,
+      "url": "https://youtu.be/e4CCkNt8OIg"
+    },
     {
       "video_id": "Vkf57WcyDGg",
       "title": "Big Tech's $725 Billion AI Trap: Nvidia Crashes as Apple Takes $5 Trillion Crown #Shorts",
       "published_at": "2026-07-30T12:03:13Z",
       "thumbnail_url": "https://i.ytimg.com/vi/Vkf57WcyDGg/mqdefault.jpg",
-      "views": 1,
+      "views": 3,
       "likes": 0,
       "comments": 0,
       "privacy_status": "public",
@@ -129,17 +227,17 @@
     }
   ],
   "recent_totals": {
-    "views": 25,
+    "views": 27,
     "likes": 0,
     "comments": 0,
-    "video_count": 9,
+    "video_count": 16,
     "avg_ctr_pct": null,
     "avg_watch_time_s": null
   },
   "channel_totals": {
     "subscriber_count": 0,
-    "view_count": 20,
-    "video_count": 9
+    "view_count": 28,
+    "video_count": 11
   },
   "history": [
     {
@@ -157,6 +255,14 @@
       "avg_watch_time_s": null,
       "channel_view_count": 20,
       "channel_video_count": 9
+    },
+    {
+      "date": "2026-08-01",
+      "total_views": 27,
+      "avg_ctr_pct": null,
+      "avg_watch_time_s": null,
+      "channel_view_count": 28,
+      "channel_video_count": 11
     }
   ]
 }
